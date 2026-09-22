@@ -1,0 +1,25 @@
+# Build
+build/
+out/
+cmake-build-*/
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local SDK path (optional override)
+.local/
