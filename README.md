@@ -58,14 +58,14 @@ doppio-plugins/
 │   ├── installing-plugins.md
 │   └── service-registry.md
 ├── templates/
-│   └── hello-plugin/         ← copy this to start a new plugin
-└── plugins/
-    ├── README.md             ← catalog index
-    ├── hello-plugin/
-    ├── terrain-generator/
-    ├── procedural-tools/
-    ├── post-processing/
-    └── git/
+│   └── hello-plugin/         ← minimal copy-paste starter
+└── plugins/                  ← official plugin source + CMakeLists.txt each
+    ├── README.md
+    ├── hello-plugin/src/
+    ├── terrain-generator/src/
+    ├── procedural-tools/src/
+    ├── post-processing/src/
+    └── git/src/
 ```
 
 ## Official plugin catalog
@@ -78,15 +78,16 @@ doppio-plugins/
 | [Post Processing](plugins/post-processing/) | `post_processing_plugin` | Post-process stack UI for cameras |
 | [Git](plugins/git/) | `git_plugin` | Optional Git workflow panel |
 
-Official plugin **source code** currently lives in the Caffeine monorepo under `apps/plugins/`. This repo documents them and hosts community plugins; sources will migrate here over time.
-
-Build all official plugins from the Caffeine tree:
+Each plugin folder contains `src/` and `CMakeLists.txt`. Build everything from this repo:
 
 ```bash
-cmake --build /path/to/caffeine/build --target \
-  hello_plugin terrain_plugin procedural_tools_plugin \
-  post_processing_plugin git_plugin
+cmake -B build -DCAFFEINE_ROOT=/path/to/caffeine \
+  -DIMGUI_DIR=/path/to/caffeine/build/_deps/imgui-src
+cmake --build build
+cp build/plugins/*.so /path/to/caffeine/build/doppio/plugins/
 ```
+
+The Caffeine monorepo still mirrors the same sources under `apps/plugins/` for in-tree builds.
 
 ## Writing your own plugin
 

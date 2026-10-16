@@ -51,15 +51,16 @@ See [writing-a-plugin.md](writing-a-plugin.md) for API details.
 
 ## Official plugins
 
-Heavyweight official plugins (terrain, procedural, post-processing, git) are built from the Caffeine monorepo today:
+All official plugins ship with **source code** under `plugins/`:
 
 ```bash
-cd $CAFFEINE_ROOT/build
-cmake --build . --target terrain_plugin procedural_tools_plugin
-cp plugins/*.so doppio/plugins/
+cmake -B build -DCAFFEINE_ROOT=$CAFFEINE_ROOT -DIMGUI_DIR=$IMGUI_DIR \
+  -DDOPPIO_PLUGINS_BUILD_TEMPLATE=OFF
+cmake --build build
+cp build/plugins/*.so $CAFFEINE_ROOT/build/doppio/plugins/
 ```
 
-See the [plugin catalog](../plugins/README.md) for per-plugin requirements.
+See the [plugin catalog](../plugins/README.md) for per-plugin details.
 
 ## Troubleshooting
 

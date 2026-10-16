@@ -6,24 +6,28 @@ project(doppio-plugins
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+if(NOT CAFFEINE_ROOT)
+    message(FATAL_ERROR
+        "CAFFEINE_ROOT is required. Example:\n"
+        "  cmake -B build -DCAFFEINE_ROOT=/path/to/caffeine")
+endif()
+
 option(DOPPIO_PLUGINS_BUILD_TEMPLATE
     "Build the hello-plugin template (minimal SDK example)"
     ON)
 
 option(DOPPIO_PLUGINS_BUILD_OFFICIAL
-    "Build official plugins from the Caffeine monorepo (requires full engine checkout)"
-    OFF)
+    "Build official plugins from plugins/"
+    ON)
 
 if(DOPPIO_PLUGINS_BUILD_TEMPLATE)
     add_subdirectory(templates/hello-plugin)
 endif()
 
 if(DOPPIO_PLUGINS_BUILD_OFFICIAL)
-    if(NOT CAFFEINE_ROOT)
-        message(FATAL_ERROR
-            "DOPPIO_PLUGINS_BUILD_OFFICIAL=ON requires -DCAFFEINE_ROOT=/path/to/caffeine")
-    endif()
-    message(STATUS "Official plugins are built from the Caffeine monorepo.")
-    message(STATUS "  cmake --build ${CAFFEINE_ROOT}/build --target terrain_plugin git_plugin ...")
-    message(STATUS "See plugins/README.md for the full target list.")
+    add_subdirectory(plugins/hello-plugin)
+    add_subdirectory(plugins/terrain-generator)
+    add_subdirectory(plugins/procedural-tools)
+    add_subdirectory(plugins/post-processing)
+    add_subdirectory(plugins/git)
 endif()

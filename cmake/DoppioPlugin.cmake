@@ -23,7 +23,7 @@ endfunction()
 function(doppio_add_plugin target)
     set(options "")
     set(oneValueArgs OUTPUT_NAME)
-    set(multiValueArgs SOURCES)
+    set(multiValueArgs SOURCES PRIVATE_INCLUDE_DIRS COMPILE_DEFINITIONS LINK_LIBRARIES)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     if(NOT ARG_SOURCES)
@@ -54,11 +54,18 @@ function(doppio_add_plugin target)
     target_include_directories(${target} PRIVATE
         "${CAFFEINE_ROOT}/include"
         "${CAFFEINE_ROOT}/src"
-        "${IMGUI_DIR}")
+        "${IMGUI_DIR}"
+        ${ARG_PRIVATE_INCLUDE_DIRS})
 
     target_compile_definitions(${target} PRIVATE
         CF_HAS_IMGUI=1
-        CAFFEINE_PLUGIN_EXPORTS=1)
+        CAFFEINE_PLUGIN_EXPORTS=1
+        CAFFEINE_SOURCE_DIR="${CAFFEINE_ROOT}"
+        ${ARG_COMPILE_DEFINITIONS})
+
+    if(ARG_LINK_LIBRARIES)
+        target_link_libraries(${target} PRIVATE ${ARG_LINK_LIBRARIES})
+    endif()
 
     target_compile_features(${target} PRIVATE cxx_std_20)
 
