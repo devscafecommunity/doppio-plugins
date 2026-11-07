@@ -12,6 +12,7 @@ Each folder contains the plugin **source code** and a `CMakeLists.txt`. Build ag
 | Post Processing | `post_processing_plugin` | [post-processing](post-processing/) |
 | Git | `git_plugin` | [git](git/) |
 | AI Development | `ai_development_plugin` | [ai-development](ai-development/) |
+| VC&M | `volumetric_clouds_plugin` | [volumetric-clouds](volumetric-clouds/) |
 
 ## Build all plugins
 
