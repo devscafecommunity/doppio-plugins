@@ -68,7 +68,8 @@ doppio-plugins/
     ├── post-processing/src/
     ├── git/src/
     ├── ai-development/src/
-    └── volumetric-clouds/src/
+    ├── volumetric-clouds/src/
+    └── photon/src/
 ```
 
 ## Official plugin catalog
@@ -82,6 +83,7 @@ doppio-plugins/
 | [Git](plugins/git/) | `git_plugin` | Optional Git workflow panel |
 | [AI Development](plugins/ai-development/) | `ai_development_plugin` | NPC navigation and behaviour authoring |
 | [VC&M](plugins/volumetric-clouds/) | `volumetric_clouds_plugin` | Procedural volumetric clouds and ground mist |
+| [Photon](plugins/photon/) | `photon_plugin` | Hybrid radiance-cascade global illumination |
 
 Each plugin folder contains `src/` and `CMakeLists.txt`. Build everything from this repo:
 
