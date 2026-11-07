@@ -41,7 +41,7 @@ cmake --build doppio-plugins/build --target volumetric_clouds_plugin
 cp build/plugins/volumetric_clouds_plugin.so /path/to/caffeine/build/plugins/
 ```
 
-Enable **VC&M** in **Plugins → Plugin Manager**, then open **Effects → Volumetric
+Enable **VC&M** in **Plugins → Plugin Manager**, then open **View → Volumetric
 Clouds & Mist**.
 
 ## Usage

@@ -184,7 +184,7 @@ public:
 
         if (m_host->registerMenuAction) {
             m_host->registerMenuAction(m_host->editorContext, GetName(),
-                                       "Effects/Volumetric Clouds & Mist",
+                                       "View/Volumetric Clouds & Mist",
                                        &VolumetricCloudsPlugin::openPanel, this);
         }
 
