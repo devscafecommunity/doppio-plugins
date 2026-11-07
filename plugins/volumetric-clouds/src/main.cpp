@@ -186,6 +186,9 @@ public:
             m_host->registerMenuAction(m_host->editorContext, GetName(),
                                        "View/Volumetric Clouds & Mist",
                                        &VolumetricCloudsPlugin::openPanel, this);
+            m_host->registerMenuAction(m_host->editorContext, GetName(),
+                                       "Plugins/Create Volumetric Clouds & Mist",
+                                       &VolumetricCloudsPlugin::createAtmosphere, this);
         }
 
         if (m_host->registerComponentDrawer && m_host->getComponentTypeId) {
@@ -218,6 +221,22 @@ private:
 
     static void markDirty(VolumetricCloudsPlugin* self) {
         Caffeine::Editor::PluginMarkDirty(self->m_host);
+    }
+
+    static void createAtmosphere(void* userData) {
+        auto* self = static_cast<VolumetricCloudsPlugin*>(userData);
+        Caffeine::ECS::World* world =
+            Caffeine::Editor::PluginActiveWorld(self->m_host);
+        if (!world) return;
+        const Caffeine::ECS::Entity target =
+            ensureTarget(self->m_host, *world, true);
+        if (auto* clouds = target.isValid()
+                               ? world->get<VolumetricCloudsComponent>(target)
+                               : nullptr) {
+            evaluate(self->m_weather, *clouds);
+            markDirty(self);
+        }
+        openPanel(self);
     }
 
     static void renderPanel(void* userData) {
