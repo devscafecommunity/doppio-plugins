@@ -17,7 +17,6 @@
 #include <filesystem>
 #include <limits>
 #include <vector>
-#include <cstdio>
 
 namespace Caffeine::PhotonAOBake {
 namespace {
@@ -108,8 +107,7 @@ public:
     }
 
     bool anyHit(const Vec3& origin, const Vec3& dir, f32 maxT) const {
-        if (m_nodes.empty()) return false;
-        return anyHitNode(0, origin, dir, maxT);
+        return !m_nodes.empty() && anyHitNode(0, origin, dir, maxT);
     }
 
     u32 triangleCount() const { return static_cast<u32>(m_tris.size()); }
@@ -230,6 +228,28 @@ bool loadOrCreateMaterial(ECS::World& world, ECS::Entity entity, const fs::path&
     return true;
 }
 
+Vec3 sampleCpuAO(const SceneBvh& bvh, const Vec3& position, const Vec3& normal, u32 rayCount,
+                 f32 maxDistance, f32 bias, u32 seed) {
+    const Vec3 rayOrigin = position + normal * bias;
+    const Vec3 up = std::abs(normal.y) < 0.99f ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
+    const Vec3 tangent = up.cross(normal).normalized();
+    const Vec3 bitangent = normal.cross(tangent);
+    const f32 jitter = hash01(seed) * 6.2831853f;
+
+    u32 visible = 0;
+    for (u32 r = 0; r < rayCount; ++r) {
+        const f32 fi = (static_cast<f32>(r) + 0.5f) / static_cast<f32>(rayCount);
+        const f32 phi = static_cast<f32>(r) * 2.39996323f + jitter;
+        const f32 cosTheta = std::sqrt(std::max(0.0f, 1.0f - fi));
+        const f32 sinTheta = std::sqrt(fi);
+        const Vec3 local(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+        const Vec3 dir =
+            (tangent * local.x + bitangent * local.y + normal * local.z).normalized();
+        if (!bvh.anyHit(rayOrigin, dir, maxDistance)) ++visible;
+    }
+    return Vec3(static_cast<f32>(visible) / static_cast<f32>(rayCount), 0.0f, 0.0f);
+}
+
 }  // namespace
 
 Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
@@ -247,7 +267,6 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
         return result;
     }
 
-    // Gather every static mesh triangle as an occluder.
     std::vector<Tri> triangles;
     ECS::ComponentQuery query;
     query.with<ECS::MeshFilterComponent>();
@@ -271,17 +290,18 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
     }
 
     SceneBvh bvh;
-    bvh.build(std::move(triangles));
+    bvh.build(triangles);
     result.triangles = bvh.triangleCount();
 
     const u32 resolution = std::clamp(settings.resolution, 64u, 2048u);
     const u32 rayCount = std::clamp(settings.rays, 1u, 64u);
     const f32 maxDistance = std::max(settings.maxDistance, 0.01f);
     const f32 bias = std::max(settings.bias, 0.0f);
-
     const size_t texelCount = static_cast<size_t>(resolution) * resolution;
-    std::vector<f32> aoSum(texelCount, 0.0f);
-    std::vector<f32> aoWeight(texelCount, 0.0f);
+
+    std::vector<Vec4> positions(texelCount, Vec4(0.0f, 0.0f, 0.0f, 0.0f));
+    std::vector<Vec4> normals(texelCount, Vec4(0.0f, 0.0f, 0.0f, 0.0f));
+    std::vector<u8> covered(texelCount, 0);
 
     const Mat4 worldMatrix = Scene::computeWorldMatrix(world, entity);
     const Mat4 normalMatrix = worldMatrix.inverted().transposed();
@@ -332,33 +352,17 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
                 const f32 w0 = 1.0f - w1 - w2;
                 if (w0 < -1e-4f || w1 < -1e-4f || w2 < -1e-4f) continue;
 
+                const size_t index = static_cast<size_t>(y) * resolution + x;
                 const Vec3 position = p0 * w0 + p1 * w1 + p2 * w2;
-                Vec3 normal = (n0 * w0 + n1 * w1 + n2 * w2);
+                positions[index] = Vec4(position.x, position.y, position.z, 1.0f);
+                Vec3 normal = n0 * w0 + n1 * w1 + n2 * w2;
                 if (normal.lengthSquared() < 1e-8f) continue;
                 normal = normal.normalized();
-
-                const Vec3 rayOrigin = position + normal * bias;
-                const Vec3 up = std::abs(normal.y) < 0.99f ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
-                const Vec3 tangent = up.cross(normal).normalized();
-                const Vec3 bitangent = normal.cross(tangent);
-                const f32 jitter = hash01(static_cast<u32>(x * 1973 + y * 9277)) * 6.2831853f;
-
-                u32 visible = 0;
-                for (u32 r = 0; r < rayCount; ++r) {
-                    const f32 fi = (static_cast<f32>(r) + 0.5f) / static_cast<f32>(rayCount);
-                    const f32 phi = static_cast<f32>(r) * 2.39996323f + jitter;
-                    const f32 cosTheta = std::sqrt(std::max(0.0f, 1.0f - fi));
-                    const f32 sinTheta = std::sqrt(fi);
-                    const Vec3 local(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-                    const Vec3 dir = (tangent * local.x + bitangent * local.y + normal * local.z)
-                                         .normalized();
-                    if (!bvh.anyHit(rayOrigin, dir, maxDistance)) ++visible;
+                normals[index] = Vec4(normal.x, normal.y, normal.z, 0.0f);
+                if (!covered[index]) {
+                    covered[index] = 1;
+                    ++coveredTexels;
                 }
-
-                const size_t index = static_cast<size_t>(y) * resolution + x;
-                aoSum[index] += static_cast<f32>(visible) / static_cast<f32>(rayCount);
-                aoWeight[index] += 1.0f;
-                if (aoWeight[index] == 1.0f) ++coveredTexels;
             }
         }
     }
@@ -368,6 +372,55 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
         return result;
     }
 
+    std::vector<f32> ao(texelCount, 1.0f);
+    bool usedGpu = false;
+    constexpr u32 kGpuTriangleLimit = 8192;
+
+    if (settings.gpuBake && bvh.triangleCount() <= kGpuTriangleLimit) {
+        std::vector<float> triangleFloats(static_cast<size_t>(bvh.triangleCount()) * 9, 0.0f);
+        for (u32 t = 0; t < bvh.triangleCount(); ++t) {
+            // Keep the same triangle order as bvh's source list.
+            const Tri& tri = triangles[t];
+            float* dst = triangleFloats.data() + static_cast<size_t>(t) * 9;
+            dst[0] = tri.a.x; dst[1] = tri.a.y; dst[2] = tri.a.z;
+            dst[3] = tri.b.x; dst[4] = tri.b.y; dst[5] = tri.b.z;
+            dst[6] = tri.c.x; dst[7] = tri.c.y; dst[8] = tri.c.z;
+        }
+
+        std::vector<float> gpuAO(texelCount, 1.0f);
+        Caffeine::Editor::PluginAOBakeDesc desc{};
+        desc.triangles = triangleFloats.data();
+        desc.triangleCount = bvh.triangleCount();
+        desc.positions = reinterpret_cast<const float*>(positions.data());
+        desc.normals = reinterpret_cast<const float*>(normals.data());
+        desc.texelCount = static_cast<unsigned int>(texelCount);
+        desc.resolution = resolution;
+        desc.rays = rayCount;
+        desc.maxDistance = maxDistance;
+        desc.bias = bias;
+        usedGpu = settings.gpuBake(settings.gpuUserData, &desc, gpuAO.data());
+        if (usedGpu) {
+            for (size_t i = 0; i < texelCount; ++i) {
+                ao[i] = covered[i] ? gpuAO[i] : 1.0f;
+            }
+        }
+    }
+
+    if (!usedGpu) {
+        for (u32 y = 0; y < resolution; ++y) {
+            for (u32 x = 0; x < resolution; ++x) {
+                const size_t index = static_cast<size_t>(y) * resolution + x;
+                if (!covered[index]) continue;
+                const Vec3 position(positions[index].x, positions[index].y, positions[index].z);
+                const Vec3 normal(normals[index].x, normals[index].y, normals[index].z);
+                const Vec3 sample = sampleCpuAO(bvh, position, normal, rayCount, maxDistance,
+                                                bias,
+                                                static_cast<u32>(x * 1973 + y * 9277));
+                ao[index] = sample.x;
+            }
+        }
+    }
+
     MaterialTarget material;
     std::string error;
     if (!loadOrCreateMaterial(world, entity, root, material, error)) {
@@ -375,7 +428,6 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
         return result;
     }
 
-    // Preserve roughness/metallic from an existing ORM map when possible.
     const fs::path existingOrm = resolve(root, material.surface.ormMap);
     int ormW = 0;
     int ormH = 0;
@@ -384,7 +436,7 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
                              ? nullptr
                              : stbi_load(existingOrm.string().c_str(), &ormW, &ormH, &ormC, 4);
 
-    std::vector<u8> pixels(static_cast<size_t>(resolution) * resolution * 4);
+    std::vector<u8> pixels(texelCount * 4);
     for (u32 y = 0; y < resolution; ++y) {
         for (u32 x = 0; x < resolution; ++x) {
             const size_t index = static_cast<size_t>(y) * resolution + x;
@@ -399,8 +451,9 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
                 g = static_cast<f32>(src[1]) / 255.0f;
                 b = static_cast<f32>(src[2]) / 255.0f;
             }
-            const f32 aoValue = aoWeight[index] > 0.0f ? aoSum[index] / aoWeight[index] : 1.0f;
-            pixels[index * 4 + 0] = static_cast<u8>(std::clamp(aoValue, 0.0f, 1.0f) * 255.0f + 0.5f);
+            const f32 aoValue = covered[index] ? ao[index] : 1.0f;
+            pixels[index * 4 + 0] =
+                static_cast<u8>(std::clamp(aoValue, 0.0f, 1.0f) * 255.0f + 0.5f);
             pixels[index * 4 + 1] = static_cast<u8>(std::clamp(g, 0.0f, 1.0f) * 255.0f + 0.5f);
             pixels[index * 4 + 2] = static_cast<u8>(std::clamp(b, 0.0f, 1.0f) * 255.0f + 0.5f);
             pixels[index * 4 + 3] = 255;
@@ -439,6 +492,7 @@ Result bake(ECS::World& world, ECS::Entity entity, const Settings& settings,
     Assets::MaterialCache::instance().invalidate(materialRelative);
 
     result.ok = true;
+    result.usedGpu = usedGpu;
     result.ormPath = ormRelative;
     result.materialPath = materialRelative;
     result.coveredTexels = coveredTexels;

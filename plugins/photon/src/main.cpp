@@ -212,6 +212,10 @@ private:
             std::clamp(static_cast<int>(self->m_aoRays), 1, 64));
         settings.maxDistance = std::max(self->m_aoMaxDistance, 0.01f);
         settings.bias = std::max(self->m_aoBias, 0.0f);
+        if (self->m_host && self->m_host->bakeAmbientOcclusion) {
+            settings.gpuBake = self->m_host->bakeAmbientOcclusion;
+            settings.gpuUserData = self->m_host->editorContext;
+        }
         const std::filesystem::path projectRoot =
             Caffeine::Editor::PluginProjectRoot(self->m_host);
         if (self->m_host && self->m_host->logInfo) {
@@ -223,7 +227,8 @@ private:
         if (result.ok) {
             char buffer[256];
             std::snprintf(buffer, sizeof(buffer),
-                          "Baked AO: %u/%u texels, %u triangles. ORM: %s", result.coveredTexels,
+                          "Baked AO (%s): %u/%u texels, %u triangles. ORM: %s",
+                          result.usedGpu ? "GPU" : "CPU", result.coveredTexels,
                           settings.resolution * settings.resolution, result.triangles,
                           result.ormPath.c_str());
             self->m_aoStatus = buffer;
@@ -247,6 +252,10 @@ private:
             std::clamp(static_cast<int>(self->m_aoRays), 1, 64));
         settings.maxDistance = std::max(self->m_aoMaxDistance, 0.01f);
         settings.bias = std::max(self->m_aoBias, 0.0f);
+        if (self->m_host && self->m_host->bakeAmbientOcclusion) {
+            settings.gpuBake = self->m_host->bakeAmbientOcclusion;
+            settings.gpuUserData = self->m_host->editorContext;
+        }
         const std::filesystem::path projectRoot =
             Caffeine::Editor::PluginProjectRoot(self->m_host);
 

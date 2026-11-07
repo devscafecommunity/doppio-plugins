@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffeine/plugin/PluginAPI.hpp"
 #include "core/Types.hpp"
 #include "ecs/Entity.hpp"
 #include "ecs/World.hpp"
@@ -13,6 +14,12 @@ struct Settings {
     u32 rays = 16;
     f32 maxDistance = 2.5f;
     f32 bias = 0.02f;
+
+    /// Optional GPU compute path. Returns false to fall back to CPU rays.
+    using GpuBakeFn = bool (*)(void* userData, const Caffeine::Editor::PluginAOBakeDesc* desc,
+                               float* outAO);
+    GpuBakeFn gpuBake = nullptr;
+    void* gpuUserData = nullptr;
 };
 
 struct Result {
@@ -22,6 +29,7 @@ struct Result {
     std::string materialPath;
     u32 coveredTexels = 0;
     u32 triangles = 0;
+    bool usedGpu = false;
 };
 
 /// Bakes static ambient occlusion for `entity` into an ORM texture and assigns
