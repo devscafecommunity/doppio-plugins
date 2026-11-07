@@ -1,5 +1,5 @@
 #include "caffeine/plugin/PluginAPI.hpp"
-#include "editor/EditorContext.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "GitRunner.hpp"
 
 #ifdef CF_HAS_IMGUI
@@ -19,9 +19,16 @@ public:
     explicit GitPlugin(const Caffeine::Editor::PluginHostApi* host) : m_host(host) {}
 
     void OnLoad() override {
-        if (!m_host || !m_host->registerPanel) return;
-        m_host->registerPanel(m_host->editorContext, GetName(), "Git",
-                              &GitPlugin::renderPanel, this);
+        if (!m_host) return;
+        Caffeine::Editor::PluginPanelInfo info;
+        info.id = "plugin.git.panel";
+        info.title = "Git";
+        info.defaultOpen = false;
+        info.icon = "git";
+        info.dock = Caffeine::Editor::PluginDockArea::Right;
+        info.size = 0.23f;
+        Caffeine::Editor::RegisterPluginPanel(m_host, GetName(), info,
+                                              &GitPlugin::renderPanel, this);
         if (m_host->registerMenuAction) {
             m_host->registerMenuAction(m_host->editorContext, GetName(), "Version Control/Git Panel",
                                        &GitPlugin::openPanelMenu, this);
@@ -38,10 +45,6 @@ public:
     }
 
 private:
-    static Caffeine::Editor::EditorContext* editorCtx(const Caffeine::Editor::PluginHostApi* host) {
-        return host ? static_cast<Caffeine::Editor::EditorContext*>(host->editorContext) : nullptr;
-    }
-
     static void openPanelMenu(void* userData) {
         auto* self = static_cast<GitPlugin*>(userData);
         if (self->m_host && self->m_host->openPanel) {
@@ -82,67 +85,71 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<GitPlugin*>(userData);
+        using namespace Caffeine::UIKit;
         if (self->m_needsRefresh) {
             self->refresh();
             self->m_needsRefresh = false;
         }
 
-        ImGui::TextWrapped(
-            "Optional Git panel — not part of Doppio core. Requires git in PATH and an open project.");
+        PanelHeader("Git", "Version control", "git");
+        Paragraph(
+            "Optional Git panel — not part of Doppio core. Requires git in PATH and an open "
+            "project.");
 
-        if (ImGui::Button("Refresh")) self->refresh();
+        if (ToolbarButton("Refresh", "Reload git status")) self->refresh();
 
         if (self->m_repoRoot.empty()) {
-            ImGui::TextDisabled("Open a project scene to detect repository root.");
+            EmptyState("No repository", "Open a project scene to detect the repository root.",
+                       "git");
             return;
         }
 
         if (!Caffeine::Plugins::Git::isGitRepository(self->m_repoRoot)) {
-            ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "Not a git repository: %s",
-                               self->m_repoRoot.string().c_str());
-            if (ImGui::Button("git init")) {
+            const std::string message = "Not a git repository: " + self->m_repoRoot.string();
+            TextWarning(message.c_str());
+            if (ToolbarButton("git init", "Initialise a repository here")) {
                 self->runGitCommand({"init"});
             }
             return;
         }
 
-        ImGui::Text("Repo: %s", self->m_repoRoot.string().c_str());
-        ImGui::Text("Branch: %s", self->m_branch.empty() ? "(detached)" : self->m_branch.c_str());
+        TextMutedF("Repo: %s", self->m_repoRoot.string().c_str());
+        TextMutedF("Branch: %s", self->m_branch.empty() ? "(detached)" : self->m_branch.c_str());
 
-        if (ImGui::CollapsingHeader("Changes", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (ImGui::Button("Stage all")) self->runGitCommand({"add", "-A"});
-            ImGui::SameLine();
-            if (ImGui::Button("Unstage all")) self->runGitCommand({"reset"});
+        if (Section("Changes")) {
+            if (ToolbarButton("Stage all")) self->runGitCommand({"add", "-A"});
+            SameLine();
+            if (ToolbarButton("Unstage all")) self->runGitCommand({"reset"});
 
-            ImGui::BeginChild("git_changes", ImVec2(0, 160), true);
+            BeginList("git_changes", ImVec2(0, 160), true);
             for (std::size_t i = 0; i < self->m_files.size(); ++i) {
                 const auto& file = self->m_files[i];
-                ImGui::PushID(static_cast<int>(i));
-                ImGui::Text("%c%c %s", file.index, file.workTree, file.path.c_str());
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Stage")) {
+                PushId(static_cast<int>(i));
+                TextF("%c%c %s", file.index, file.workTree, file.path.c_str());
+                SameLine();
+                if (MiniButton("Stage")) {
                     self->runGitCommand({"add", file.path});
                 }
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Diff")) {
+                SameLine();
+                if (MiniButton("Diff")) {
                     self->m_lastOutput =
                         Caffeine::Plugins::Git::runGit(self->m_repoRoot, {"diff", file.path}).output;
                 }
-                ImGui::PopID();
+                PopId();
             }
-            ImGui::EndChild();
+            EndList();
         }
 
-        if (ImGui::CollapsingHeader("Commit", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::InputTextMultiline("Message", self->m_commitMessage, sizeof(self->m_commitMessage),
+        if (Section("Commit")) {
+            InputTextMultiline("Message", self->m_commitMessage, sizeof(self->m_commitMessage),
                                       ImVec2(-1, 60));
-            if (ImGui::Button("Commit") && self->m_commitMessage[0] != '\0') {
+            if (PrimaryButton("Commit") && self->m_commitMessage[0] != '\0') {
                 self->runGitCommand({"commit", "-m", self->m_commitMessage});
                 self->m_commitMessage[0] = '\0';
             }
         }
 
-        if (ImGui::CollapsingHeader("Branches")) {
+        if (Section("Branches", false)) {
             int branchIndex = 0;
             for (std::size_t i = 0; i < self->m_branches.size(); ++i) {
                 if (self->m_branches[i] == self->m_branch) branchIndex = static_cast<int>(i);
@@ -151,57 +158,57 @@ private:
                 std::vector<const char*> labels;
                 labels.reserve(self->m_branches.size());
                 for (const auto& b : self->m_branches) labels.push_back(b.c_str());
-                if (ImGui::Combo("Checkout", &branchIndex, labels.data(),
+                if (Combo("Checkout", &branchIndex, labels.data(),
                                  static_cast<int>(labels.size()))) {
                     self->runGitCommand({"checkout", self->m_branches[branchIndex]});
                 }
             }
-            ImGui::InputText("New branch", self->m_newBranch, sizeof(self->m_newBranch));
-            ImGui::SameLine();
-            if (ImGui::Button("Create") && self->m_newBranch[0] != '\0') {
+            InputTextLine("New branch", self->m_newBranch, sizeof(self->m_newBranch));
+            SameLine();
+            if (ToolbarButton("Create") && self->m_newBranch[0] != '\0') {
                 self->runGitCommand({"checkout", "-b", self->m_newBranch});
                 self->m_newBranch[0] = '\0';
             }
         }
 
-        if (ImGui::CollapsingHeader("Remotes & sync")) {
+        if (Section("Remotes & sync", false)) {
             for (const auto& remote : self->m_remotes) {
-                ImGui::BulletText("%s", remote.c_str());
+                Bullet(remote.c_str());
             }
-            if (ImGui::Button("Fetch")) self->runGitCommand({"fetch", "--all", "--prune"});
-            ImGui::SameLine();
-            if (ImGui::Button("Pull")) self->runGitCommand({"pull"});
-            ImGui::SameLine();
-            if (ImGui::Button("Push")) self->runGitCommand({"push"});
+            if (ToolbarButton("Fetch")) self->runGitCommand({"fetch", "--all", "--prune"});
+            SameLine();
+            if (ToolbarButton("Pull")) self->runGitCommand({"pull"});
+            SameLine();
+            if (ToolbarButton("Push")) self->runGitCommand({"push"});
         }
 
-        if (ImGui::CollapsingHeader("History")) {
-            ImGui::BeginChild("git_log", ImVec2(0, 120), true);
+        if (Section("History", false)) {
+            BeginList("git_log", ImVec2(0, 120), true);
             for (const auto& entry : self->m_log) {
-                if (ImGui::Selectable(entry.c_str())) {
+                if (SelectableRow(entry.c_str())) {
                     self->m_lastOutput = entry;
                 }
             }
-            ImGui::EndChild();
+            EndList();
         }
 
-        if (ImGui::CollapsingHeader("Stash")) {
-            if (ImGui::Button("Stash push")) self->runGitCommand({"stash", "push", "-u"});
-            ImGui::SameLine();
-            if (ImGui::Button("Stash pop")) self->runGitCommand({"stash", "pop"});
-            ImGui::SameLine();
-            if (ImGui::Button("Stash list")) {
+        if (Section("Stash", false)) {
+            if (ToolbarButton("Stash push")) self->runGitCommand({"stash", "push", "-u"});
+            SameLine();
+            if (ToolbarButton("Stash pop")) self->runGitCommand({"stash", "pop"});
+            SameLine();
+            if (ToolbarButton("Stash list")) {
                 self->m_lastOutput =
                     Caffeine::Plugins::Git::runGit(self->m_repoRoot, {"stash", "list"}).output;
             }
         }
 
         if (!self->m_lastOutput.empty()) {
-            ImGui::Separator();
-            ImGui::TextUnformatted("Output");
-            ImGui::BeginChild("git_output", ImVec2(0, 120), true);
-            ImGui::TextUnformatted(self->m_lastOutput.c_str());
-            ImGui::EndChild();
+            SeparatorSpaced();
+            SectionLabel("Output");
+            BeginList("git_output", ImVec2(0, 120), true);
+            TextF("%s", self->m_lastOutput.c_str());
+            EndList();
         }
 #else
         (void)userData;

@@ -1,5 +1,5 @@
 #include "caffeine/plugin/PluginAPI.hpp"
-#include "editor/EditorContext.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "ProceduralBridge.hpp"
 
 extern "C" void caffeine_procedural_plugin_register_services(
@@ -34,9 +34,15 @@ public:
     void OnLoad() override {
         if (!m_host) return;
         caffeine_procedural_plugin_register_services(m_host);
-        if (!m_host->registerPanel) return;
-        m_host->registerPanel(m_host->editorContext, GetName(), "Procedural Tools",
-                              &ProceduralToolsPlugin::renderPanel, this);
+        Caffeine::Editor::PluginPanelInfo info;
+        info.id = "plugin.procedural.tools";
+        info.title = "Procedural Tools";
+        info.defaultOpen = false;
+        info.icon = "terrain";
+        info.dock = Caffeine::Editor::PluginDockArea::Right;
+        info.size = 0.23f;
+        Caffeine::Editor::RegisterPluginPanel(m_host, GetName(), info,
+                                              &ProceduralToolsPlugin::renderPanel, this);
         if (m_host->registerMenuAction) {
             m_host->registerMenuAction(
                 m_host->editorContext, GetName(), "Game/Install Procedural Scripts",
@@ -54,29 +60,19 @@ public:
     }
 
 private:
-    static Caffeine::Editor::EditorContext* editorCtx(
-        const Caffeine::Editor::PluginHostApi* host) {
-        return host ? static_cast<Caffeine::Editor::EditorContext*>(host->editorContext) : nullptr;
-    }
-
-    static std::filesystem::path projectRoot(Caffeine::Editor::EditorContext* ctx) {
-        if (!ctx || ctx->currentScenePath.empty()) return {};
-        return std::filesystem::path(ctx->currentScenePath).parent_path().parent_path();
-    }
-
     static void installScriptsMenu(void* userData) {
         auto* self = static_cast<ProceduralToolsPlugin*>(userData);
-        auto* ctx = editorCtx(self->m_host);
-        if (!ctx) return;
+        const std::filesystem::path root = Caffeine::Editor::PluginProjectRoot(self->m_host);
+        if (root.empty()) return;
         std::string error;
-        if (!Caffeine::Editor::ProceduralBridge::installScriptTemplates(projectRoot(ctx), error)) {
+        if (!Caffeine::Editor::ProceduralBridge::installScriptTemplates(root, error)) {
             if (self->m_host->logError) self->m_host->logError(self->m_host->editorContext, error.c_str());
         }
     }
 
 #ifdef CF_HAS_IMGUI
-    bool invokeStreamingSetup(Caffeine::Editor::EditorContext* ctx) const {
-        if (!ctx || !ctx->activeWorld) return false;
+    bool invokeStreamingSetup(Caffeine::ECS::World* world) const {
+        if (!world) return false;
         Caffeine::Editor::ProceduralStreamingSetup setup;
         setup.seed = static_cast<Caffeine::u32>(m_seed);
         setup.chunkSize = m_chunkSize;
@@ -88,29 +84,29 @@ private:
         Caffeine::ECS::Entity director;
         Caffeine::ECS::Entity terrain;
         std::string error;
-        if (!Caffeine::Editor::ProceduralBridge::createStreamingSetup(*ctx->activeWorld, setup,
+        if (!Caffeine::Editor::ProceduralBridge::createStreamingSetup(*world, setup,
                                                                       director, terrain, error)) {
             if (m_host->logError) m_host->logError(m_host->editorContext, error.c_str());
             return false;
         }
-        ctx->selectedEntity = director;
-        ctx->isDirty = true;
+        Caffeine::Editor::PluginSelectEntity(m_host, director);
+        Caffeine::Editor::PluginMarkDirty(m_host);
         return true;
     }
 
-    bool invokeBenchmark(Caffeine::Editor::EditorContext* ctx, int index) const {
-        if (!ctx || !ctx->activeWorld || index < 0 || index >= 3) return false;
+    bool invokeBenchmark(Caffeine::ECS::World* world, int index) const {
+        if (!world || index < 0 || index >= 3) return false;
         Caffeine::ECS::Entity director;
         Caffeine::ECS::Entity terrain;
         std::string error;
         if (!Caffeine::Editor::ProceduralBridge::loadBenchmark(
-                *ctx->activeWorld, kBenchmarks[index], static_cast<Caffeine::u32>(m_seed),
+                *world, kBenchmarks[index], static_cast<Caffeine::u32>(m_seed),
                 m_chunkSize, static_cast<Caffeine::u32>(m_viewRadius), director, terrain, error)) {
             if (m_host->logError) m_host->logError(m_host->editorContext, error.c_str());
             return false;
         }
-        ctx->selectedEntity = director;
-        ctx->isDirty = true;
+        Caffeine::Editor::PluginSelectEntity(m_host, director);
+        Caffeine::Editor::PluginMarkDirty(m_host);
         return true;
     }
 #endif
@@ -118,83 +114,89 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<ProceduralToolsPlugin*>(userData);
-        auto* ctx = editorCtx(self->m_host);
-        if (!ctx || !ctx->activeWorld) {
-            ImGui::TextDisabled("No active scene.");
+        using namespace Caffeine::UIKit;
+        auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
+        if (!world) {
+            EmptyState("No active scene", "Open or create a scene to author procedural streaming.",
+                       "terrain");
             return;
         }
 
-        ImGui::TextWrapped(
+        PanelHeader("Procedural Tools", "Streaming terrain, structures and Lua directors",
+                    "terrain");
+        Paragraph(
             "Modular tools for procedural streaming: combine terrain generators, structure "
             "spawners, and Lua directors to build any game. Press Play to stream chunks.");
 
-        if (ImGui::CollapsingHeader("Streaming", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::DragInt("Seed", &self->m_seed, 1, 0, 999999);
-            ImGui::DragFloat("Chunk size (m)", &self->m_chunkSize, 4.0f, 32.0f, 256.0f, "%.0f");
-            ImGui::DragInt("View radius (chunks)", &self->m_viewRadius, 1, 2, 12);
-        }
-
-        if (ImGui::CollapsingHeader("Built-in generators", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Combo("Terrain height", &self->m_terrainProfileIndex, kTerrainProfileLabels,
-                         IM_ARRAYSIZE(kTerrainProfileLabels));
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Height profile baked per chunk. Override in Lua with "
-                                  "generateTerrainChunk / fillTerrainNoise.");
-            }
-            ImGui::Combo("Structure spawner", &self->m_structureProfileIndex,
-                         kStructureProfileLabels, IM_ARRAYSIZE(kStructureProfileLabels));
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Optional cubes spawned per chunk. Use none and spawn via Lua for full control.");
+        if (Section("Streaming")) {
+            if (BeginPropertyGrid("procedural_streaming")) {
+                DragIntProperty("Seed", &self->m_seed, 1.0f, 0, 999999);
+                DragFloatProperty("Chunk size (m)", &self->m_chunkSize, 4.0f, 32.0f, 256.0f,
+                                  "%.0f");
+                DragIntProperty("View radius (chunks)", &self->m_viewRadius, 1.0f, 2, 12);
+                EndPropertyGrid();
             }
         }
 
-        if (ImGui::CollapsingHeader("Director script", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::InputText("Script path", self->m_scriptPath, sizeof(self->m_scriptPath));
-            if (ImGui::Button("Install Lua scripts to project")) {
+        if (Section("Built-in generators")) {
+            if (BeginPropertyGrid("procedural_generators")) {
+                ComboProperty("Terrain height", &self->m_terrainProfileIndex,
+                              kTerrainProfileLabels, IM_ARRAYSIZE(kTerrainProfileLabels));
+                HelpMarker("Height profile baked per chunk. Override in Lua with "
+                           "generateTerrainChunk / fillTerrainNoise.");
+                ComboProperty("Structure spawner", &self->m_structureProfileIndex,
+                              kStructureProfileLabels, IM_ARRAYSIZE(kStructureProfileLabels));
+                HelpMarker("Optional cubes spawned per chunk. Use none and spawn via Lua for full "
+                           "control.");
+                EndPropertyGrid();
+            }
+        }
+
+        if (Section("Director script")) {
+            if (BeginPropertyGrid("procedural_director")) {
+                InputTextProperty("Script path", self->m_scriptPath, sizeof(self->m_scriptPath));
+                EndPropertyGrid();
+            }
+            if (ToolbarButton("Install Lua scripts to project",
+                              "Copies templates to scripts/procedural/")) {
                 installScriptsMenu(self);
             }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Copies templates to scripts/procedural/");
-            }
         }
 
-        if (ImGui::CollapsingHeader("Scene setup", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (ImGui::Button("Create Streaming Setup")) {
-                if (self->invokeStreamingSetup(ctx) && self->m_host->logInfo) {
+        if (Section("Scene setup")) {
+            if (PrimaryButton("Create Streaming Setup", ImVec2(-1, 0))) {
+                if (self->invokeStreamingSetup(world) && self->m_host->logInfo) {
                     self->m_host->logInfo(self->m_host->editorContext,
                                           "Streaming setup created. Press Play to stream.");
                 }
             }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Creates ProceduralTerrain + ProceduralDirector with your settings.");
-            }
+            HelpMarker("Creates ProceduralTerrain + ProceduralDirector with your settings.");
         }
 
-        if (ImGui::CollapsingHeader("Lua API reference")) {
-            ImGui::BulletText("caffeine.procedural.stream(director, terrain, cx, cz)");
-            ImGui::BulletText("caffeine.procedural.generateTerrainChunk(...)");
-            ImGui::BulletText("caffeine.procedural.spawnCube(...)");
-            ImGui::BulletText("caffeine.procedural.fbm2d / noise2d / hash");
-            ImGui::BulletText("caffeine.procedural.getFocusChunk / isChunkLoaded");
+        if (Section("Lua API reference", false)) {
+            Bullet("caffeine.procedural.stream(director, terrain, cx, cz)");
+            Bullet("caffeine.procedural.generateTerrainChunk(...)");
+            Bullet("caffeine.procedural.spawnCube(...)");
+            Bullet("caffeine.procedural.fbm2d / noise2d / hash");
+            Bullet("caffeine.procedural.getFocusChunk / isChunkLoaded");
         }
 
-        if (ImGui::CollapsingHeader("Benchmarks (examples)")) {
-            ImGui::TextWrapped(
+        if (Section("Benchmarks (examples)", false)) {
+            Paragraph(
                 "Reference setups — not game types. Study or duplicate these scripts, then mix "
                 "tools for your own design.");
             for (int i = 0; i < 3; ++i) {
-                if (ImGui::Button(kBenchmarkLabels[i])) {
-                    if (self->invokeBenchmark(ctx, i) && self->m_host->logInfo) {
+                if (ToolbarButton(kBenchmarkLabels[i], "Load this benchmark scene")) {
+                    if (self->invokeBenchmark(world, i) && self->m_host->logInfo) {
                         self->m_host->logInfo(self->m_host->editorContext,
                                               "Benchmark scene loaded. Press Play to test.");
                     }
                 }
-                if (i < 2) ImGui::SameLine();
+                if (i < 2) SameLine();
             }
-            ImGui::Separator();
-            ImGui::TextDisabled("Scripts: exploration_director.lua, backrooms_director.lua, "
-                                "endless_race_director.lua, custom_director.lua");
+            SeparatorSpaced();
+            TextMuted("Scripts: exploration_director.lua, backrooms_director.lua, "
+                      "endless_race_director.lua, custom_director.lua");
         }
 #else
         (void)userData;

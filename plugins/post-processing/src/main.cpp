@@ -1,7 +1,7 @@
 #include "caffeine/plugin/PluginAPI.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "caffeine/postprocess/PostProcessEditorUI.hpp"
 #include "caffeine/postprocess/PostProcessPresets.hpp"
-#include "editor/EditorContext.hpp"
 #include "ecs/PostProcessComponents.hpp"
 #include "ecs/CameraComponents.hpp"
 
@@ -17,10 +17,15 @@ public:
 
     void OnLoad() override {
         if (!m_host) return;
-        if (m_host->registerPanel) {
-            m_host->registerPanel(m_host->editorContext, GetName(), "Post Processing",
-                                  &PostProcessingPlugin::renderPanel, this);
-        }
+        Caffeine::Editor::PluginPanelInfo info;
+        info.id = "plugin.post_processing.panel";
+        info.title = "Post Processing";
+        info.defaultOpen = false;
+        info.icon = "effects";
+        info.dock = Caffeine::Editor::PluginDockArea::Right;
+        info.size = 0.23f;
+        Caffeine::Editor::RegisterPluginPanel(m_host, GetName(), info,
+                                              &PostProcessingPlugin::renderPanel, this);
         if (m_host->registerMenuAction) {
             m_host->registerMenuAction(m_host->editorContext, GetName(),
                                      "Effects/Add Post Process to Camera",
@@ -46,50 +51,54 @@ public:
     }
 
 private:
-    static Caffeine::Editor::EditorContext* editorCtx(const Caffeine::Editor::PluginHostApi* host) {
-        return host ? static_cast<Caffeine::Editor::EditorContext*>(host->editorContext) : nullptr;
-    }
-
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<PostProcessingPlugin*>(userData);
-        auto* ctx = editorCtx(self->m_host);
-        if (!ctx || !ctx->activeWorld) {
-            ImGui::TextDisabled("No active scene.");
+        using namespace Caffeine::UIKit;
+        auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
+        if (!world) {
+            EmptyState("No active scene", "Open or create a scene with a camera to author effects.",
+                       "effects");
             return;
         }
-        Caffeine::ECS::World& world = *ctx->activeWorld;
-        if (!ctx->selectedEntity.isValid()) {
-            ImGui::TextWrapped(
-                "Select a camera entity. Combine effect modules below — Cinematic / Horror / Arcade "
-                "are optional benchmark looks, not game types.");
+        const Caffeine::ECS::Entity e =
+            Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
+        if (!e.isValid()) {
+            EmptyState("Select a camera entity",
+                       "Combine effect modules below — Cinematic / Horror / Arcade are optional "
+                       "benchmark looks, not game types.",
+                       "effects");
             return;
         }
 
-        Caffeine::ECS::Entity e = ctx->selectedEntity;
-        ImGui::Text("Target: %s (entity %u)", Caffeine::Editor::getEntityName(world, e), e.id());
+        PanelHeader("Post Processing", "GPU effect stack", "effects");
+        TextMutedF("Target: entity %u", e.id());
 
-        if (!world.has<Caffeine::ECS::PostProcessComponent>(e)) {
-            if (ImGui::Button("Add Post Process Stack")) {
-                world.add<Caffeine::ECS::PostProcessComponent>(e);
-                ctx->isDirty = true;
+        if (!world->has<Caffeine::ECS::PostProcessComponent>(e)) {
+            if (PrimaryButton("Add Post Process Stack")) {
+                world->add<Caffeine::ECS::PostProcessComponent>(e);
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
             }
             return;
         }
 
-        auto* fx = world.get<Caffeine::ECS::PostProcessComponent>(e);
+        auto* fx = world->get<Caffeine::ECS::PostProcessComponent>(e);
         if (!fx) return;
 
-        ImGui::TextWrapped(
-            "Modular effect stack — enable and tune each module independently. GPU passes are "
-            "planned; editor preview uses approximate overlays.");
+        Paragraph(
+            "The same stack the viewport and gameplay preview run on the GPU. Enable each module "
+            "on its own; cinematic, horror and arcade are optional looks, not game types.");
 
-        if (ImGui::CollapsingHeader("Benchmark looks (optional)", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (Caffeine::PostProcess::EditorUI::drawBenchmarkPresets(*fx)) ctx->isDirty = true;
+        if (Section("Benchmark looks (optional)")) {
+            if (Caffeine::PostProcess::EditorUI::drawBenchmarkPresets(*fx)) {
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
+            }
         }
 
-        ImGui::Separator();
-        if (Caffeine::PostProcess::EditorUI::drawEffectStack(*fx)) ctx->isDirty = true;
+        SeparatorSpaced();
+        if (Caffeine::PostProcess::EditorUI::drawEffectStack(*fx)) {
+            Caffeine::Editor::PluginMarkDirty(self->m_host);
+        }
 #else
         (void)userData;
 #endif
@@ -97,21 +106,22 @@ private:
 
     static void addToSelectedCamera(void* userData) {
         auto* self = static_cast<PostProcessingPlugin*>(userData);
-        auto* ctx = editorCtx(self->m_host);
-        if (!ctx || !ctx->activeWorld || !ctx->selectedEntity.isValid()) return;
-        Caffeine::ECS::World& world = *ctx->activeWorld;
-        Caffeine::ECS::Entity e = ctx->selectedEntity;
-        if (!world.has<Caffeine::ECS::Camera2DComponent>(e) &&
-            !world.has<Caffeine::ECS::Camera3DComponent>(e)) {
+        auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
+        if (!world) return;
+        const Caffeine::ECS::Entity e =
+            Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
+        if (!e.isValid()) return;
+        if (!world->has<Caffeine::ECS::Camera2DComponent>(e) &&
+            !world->has<Caffeine::ECS::Camera3DComponent>(e)) {
             if (self->m_host->logError) {
                 self->m_host->logError(self->m_host->editorContext,
                                        "Select a Camera2D or Camera3D entity first.");
             }
             return;
         }
-        if (!world.has<Caffeine::ECS::PostProcessComponent>(e)) {
-            world.add<Caffeine::ECS::PostProcessComponent>(e);
-            ctx->isDirty = true;
+        if (!world->has<Caffeine::ECS::PostProcessComponent>(e)) {
+            world->add<Caffeine::ECS::PostProcessComponent>(e);
+            Caffeine::Editor::PluginMarkDirty(self->m_host);
         }
         if (self->m_host->logInfo) {
             self->m_host->logInfo(self->m_host->editorContext, "Post-process stack added to camera.");

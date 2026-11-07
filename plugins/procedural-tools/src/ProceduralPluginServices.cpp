@@ -1,12 +1,16 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginServices.hpp"
-#include "editor/EditorContext.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "ProceduralBridge.hpp"
 
 #include <filesystem>
 #include <iostream>
 
 namespace {
+
+const Caffeine::Editor::PluginHostApi* hostFrom(void* context) {
+    return static_cast<const Caffeine::Editor::PluginHostApi*>(context);
+}
 
 bool fillSetupResponse(void* response, std::size_t responseSize, Caffeine::ECS::Entity director,
                        Caffeine::ECS::Entity terrain) {
@@ -25,12 +29,9 @@ bool proceduralInstallScripts(void* editorContext, const void* request, std::siz
     (void)response;
     (void)responseSize;
     if (!editorContext) return false;
-    auto* ctx = static_cast<Caffeine::Editor::EditorContext*>(editorContext);
+    const auto* host = hostFrom(editorContext);
 
-    std::filesystem::path projectRoot;
-    if (!ctx->currentScenePath.empty()) {
-        projectRoot = std::filesystem::path(ctx->currentScenePath).parent_path().parent_path();
-    }
+    std::filesystem::path projectRoot = Caffeine::Editor::PluginProjectRoot(host);
     if (projectRoot.empty()) return false;
 
     std::string error;
@@ -48,8 +49,9 @@ bool proceduralCreateStreamingSetup(void* editorContext, const void* request,
         requestSize < sizeof(Caffeine::Editor::ProceduralStreamingSetupRequest)) {
         return false;
     }
-    auto* ctx = static_cast<Caffeine::Editor::EditorContext*>(editorContext);
-    if (!ctx->activeWorld) return false;
+    const auto* host = hostFrom(editorContext);
+    Caffeine::ECS::World* world = Caffeine::Editor::PluginActiveWorld(host);
+    if (!world) return false;
 
     const auto* req = static_cast<const Caffeine::Editor::ProceduralStreamingSetupRequest*>(request);
     Caffeine::Editor::ProceduralStreamingSetup setup;
@@ -60,19 +62,18 @@ bool proceduralCreateStreamingSetup(void* editorContext, const void* request,
     setup.terrainProfile = req->terrainProfile;
     setup.structureProfile = req->structureProfile;
 
-    Caffeine::ECS::World& world = *ctx->activeWorld;
     Caffeine::ECS::Entity director;
     Caffeine::ECS::Entity terrain;
     std::string error;
-    if (!Caffeine::Editor::ProceduralBridge::createStreamingSetup(world, setup, director, terrain,
+    if (!Caffeine::Editor::ProceduralBridge::createStreamingSetup(*world, setup, director, terrain,
                                                                   error)) {
         std::cerr << "[ProceduralPlugin] createStreamingSetup: " << error << '\n';
         return false;
     }
 
     fillSetupResponse(response, responseSize, director, terrain);
-    ctx->selectedEntity = director;
-    ctx->isDirty = true;
+    Caffeine::Editor::PluginSelectEntity(host, director);
+    Caffeine::Editor::PluginMarkDirty(host);
     return true;
 }
 
@@ -82,15 +83,15 @@ bool proceduralLoadBenchmark(void* editorContext, const void* request, std::size
         requestSize < sizeof(Caffeine::Editor::ProceduralLoadBenchmarkRequest)) {
         return false;
     }
-    auto* ctx = static_cast<Caffeine::Editor::EditorContext*>(editorContext);
-    if (!ctx->activeWorld) return false;
+    const auto* host = hostFrom(editorContext);
+    Caffeine::ECS::World* world = Caffeine::Editor::PluginActiveWorld(host);
+    if (!world) return false;
 
     const auto* req = static_cast<const Caffeine::Editor::ProceduralLoadBenchmarkRequest*>(request);
-    Caffeine::ECS::World& world = *ctx->activeWorld;
     Caffeine::ECS::Entity director;
     Caffeine::ECS::Entity terrain;
     std::string error;
-    if (!Caffeine::Editor::ProceduralBridge::loadBenchmark(world, req->benchmarkName, req->seed,
+    if (!Caffeine::Editor::ProceduralBridge::loadBenchmark(*world, req->benchmarkName, req->seed,
                                                            req->chunkSizeMeters,
                                                            req->viewRadiusChunks, director, terrain,
                                                            error)) {
@@ -99,8 +100,8 @@ bool proceduralLoadBenchmark(void* editorContext, const void* request, std::size
     }
 
     fillSetupResponse(response, responseSize, director, terrain);
-    ctx->selectedEntity = director;
-    ctx->isDirty = true;
+    Caffeine::Editor::PluginSelectEntity(host, director);
+    Caffeine::Editor::PluginMarkDirty(host);
     return true;
 }
 

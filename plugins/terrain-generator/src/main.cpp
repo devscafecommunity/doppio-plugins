@@ -1,7 +1,8 @@
 #include "caffeine/plugin/PluginAPI.hpp"
-#include "editor/EditorContext.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "ecs/TerrainComponents.hpp"
 #include "TerrainBridge.hpp"
+#include "TerrainEditorPanel.hpp"
 
 extern "C" void caffeine_terrain_plugin_register_services(
     const Caffeine::Editor::PluginHostApi* host);
@@ -21,10 +22,26 @@ public:
     void OnLoad() override {
         if (!m_host) return;
         caffeine_terrain_plugin_register_services(m_host);
-        if (m_host->registerPanel) {
-            m_host->registerPanel(m_host->editorContext, GetName(), "Terrain Generator",
-                                  &TerrainGeneratorPlugin::renderPanel, this);
-        }
+        Caffeine::Editor::PluginPanelInfo info;
+        info.id = "plugin.terrain.generator";
+        info.title = "Terrain Generator";
+        info.defaultOpen = false;
+        info.icon = "terrain";
+        info.dock = Caffeine::Editor::PluginDockArea::Bottom;
+        info.size = 0.28f;
+        Caffeine::Editor::RegisterPluginPanel(
+            m_host, GetName(), info, &TerrainGeneratorPlugin::renderPanel, this);
+
+        Caffeine::Editor::PluginPanelInfo editor;
+        editor.id = "plugin.terrain.editor";
+        editor.title = "Terrain Editor";
+        editor.icon = "terrain";
+        editor.dock = Caffeine::Editor::PluginDockArea::Bottom;
+        editor.size = 0.28f;
+        editor.defaultOpen = true;
+        Caffeine::Editor::RegisterPluginPanel(
+            m_host, GetName(), editor, &Caffeine::Plugins::Terrain::renderTerrainEditor,
+            const_cast<Caffeine::Editor::PluginHostApi*>(m_host));
     }
 
     void OnUnload() override {}
@@ -37,54 +54,56 @@ public:
     }
 
 private:
-    static Caffeine::Editor::EditorContext* editorCtx(
-        const Caffeine::Editor::PluginHostApi* host) {
-        return host ? static_cast<Caffeine::Editor::EditorContext*>(host->editorContext) : nullptr;
-    }
-
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<TerrainGeneratorPlugin*>(userData);
-        auto* ctx = editorCtx(self->m_host);
-        if (!ctx || !ctx->activeWorld) {
-            ImGui::TextDisabled("No active scene.");
+        auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
+        if (!world) {
+            Caffeine::UIKit::EmptyState("No active scene", "Open or create a scene to generate terrain.",
+                                        "terrain");
             return;
         }
 
-        Caffeine::ECS::World& world = *ctx->activeWorld;
-        if (!ctx->selectedEntity.isValid() || !world.has<Caffeine::ECS::TerrainComponent>(ctx->selectedEntity)) {
-            ImGui::TextWrapped(
-                "Select a Terrain entity, then choose a preset and click Generate. Sculpt and paint "
-                "in the Terrain Editor panel.");
+        const Caffeine::ECS::Entity entity =
+            Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
+        if (!entity.isValid() ||
+            !world->has<Caffeine::ECS::TerrainComponent>(entity)) {
+            Caffeine::UIKit::EmptyState("No terrain entity selected",
+                                        "Select a Terrain entity, then choose a preset and click Generate.",
+                                        "terrain");
             return;
         }
 
-        auto* terrain = world.get<Caffeine::ECS::TerrainComponent>(ctx->selectedEntity);
+        auto* terrain = world->get<Caffeine::ECS::TerrainComponent>(entity);
         if (!terrain) return;
 
-        ImGui::Text("Entity %u — %ux%u heightmap", ctx->selectedEntity.id(), terrain->resolutionX,
-                    terrain->resolutionZ);
+        using namespace Caffeine::UIKit;
+        PanelHeader("Terrain Generator", "Domain warping + geomorphological PDE", "terrain");
+        TextMutedF("Entity %u · %ux%u heightmap", entity.id(),
+                   terrain->resolutionX, terrain->resolutionZ);
 
         static const char* kPresets[] = {"default", "alpine", "mesa", "volcanic", "glacial", "blend"};
-        ImGui::Combo("Preset", &self->m_presetIndex, kPresets, IM_ARRAYSIZE(kPresets));
+        if (BeginPropertyGrid("terrain_generator_props")) {
+            ComboProperty("Preset", &self->m_presetIndex, kPresets, IM_ARRAYSIZE(kPresets));
+            DragFloatProperty("World size (m)", &self->m_worldSize, 4.0f, 32.0f, 4096.0f, "%.0f");
+            DragIntProperty("Grid size", &self->m_gridSize, 8.0f, 64, 1024);
+            DragIntProperty("Seed", &self->m_seed, 1.0f, 0, 999999);
+            EndPropertyGrid();
+        }
 
-        ImGui::DragFloat("World Size (m)", &self->m_worldSize, 4.0f, 32.0f, 4096.0f, "%.0f");
-        ImGui::DragInt("Grid Size", &self->m_gridSize, 8, 64, 1024);
-        ImGui::DragInt("Seed", &self->m_seed, 1, 0, 999999);
-
-        ImGui::Separator();
+        SeparatorSpaced();
         if (self->m_busy) {
-            ImGui::TextDisabled("Generating… (Node.js)");
-        } else if (ImGui::Button("Generate Terrain")) {
+            TextMuted("Generating… (Node.js)");
+        } else if (PrimaryButton("Generate Terrain")) {
             self->m_busy = true;
             std::string error;
             const bool ok = Caffeine::Editor::TerrainBridge::generateUltraRealistic(
-                world, ctx->selectedEntity, kPresets[self->m_presetIndex],
+                *world, entity, kPresets[self->m_presetIndex],
                 static_cast<Caffeine::u32>(self->m_seed), self->m_worldSize,
                 static_cast<Caffeine::u32>(self->m_gridSize), error);
             self->m_busy = false;
             if (ok) {
-                ctx->isDirty = true;
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
                 if (self->m_host->logInfo) {
                     self->m_host->logInfo(self->m_host->editorContext, "Terrain generated.");
                 }
@@ -93,22 +112,24 @@ private:
             }
         }
 
-        ImGui::Separator();
-        ImGui::TextUnformatted("Import");
-        ImGui::InputText("Heightmap path", self->m_importPath, sizeof(self->m_importPath));
-        if (ImGui::Button("Import .txt heightmap")) {
+        SeparatorSpaced();
+        SectionLabel("Import");
+        if (BeginPropertyGrid("terrain_import")) {
+            InputTextProperty("Heightmap path", self->m_importPath, sizeof(self->m_importPath));
+            EndPropertyGrid();
+        }
+        if (ToolbarButton("Import .txt heightmap")) {
             std::string error;
             if (Caffeine::Editor::TerrainBridge::importHeightmap(
-                    world, ctx->selectedEntity, self->m_importPath, terrain->worldSizeX,
+                    *world, entity, self->m_importPath, terrain->worldSizeX,
                     terrain->worldSizeZ, error)) {
-                ctx->isDirty = true;
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
             } else if (self->m_host->logError) {
                 self->m_host->logError(self->m_host->editorContext, error.c_str());
             }
         }
 
-        ImGui::Separator();
-        ImGui::TextDisabled(
+        TextMuted(
             "Algorithm: assets/general-ultra-realistic-terrain-algorithm (npm install on first run).");
 #else
         (void)userData;

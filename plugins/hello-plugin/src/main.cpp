@@ -1,4 +1,5 @@
-#include "editor/PluginAPI.hpp"
+#include "caffeine/plugin/PluginAPI.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 
 #ifdef CF_HAS_IMGUI
 #include <imgui.h>
@@ -11,9 +12,16 @@ public:
     explicit HelloPlugin(const Caffeine::Editor::PluginHostApi* host) : m_host(host) {}
 
     void OnLoad() override {
-        if (!m_host || !m_host->registerPanel) return;
-        m_host->registerPanel(m_host->editorContext, "Hello Plugin", "Hello Plugin",
-                              &HelloPlugin::renderPanel, this);
+        if (!m_host) return;
+        Caffeine::Editor::PluginPanelInfo info;
+        info.id = "plugin.hello.panel";
+        info.title = "Hello Plugin";
+        info.defaultOpen = false;
+        info.icon = "hello";
+        info.dock = Caffeine::Editor::PluginDockArea::Bottom;
+        info.size = 0.20f;
+        Caffeine::Editor::RegisterPluginPanel(m_host, "Hello Plugin", info,
+                                              &HelloPlugin::renderPanel, this);
         if (m_host->registerMenuAction) {
             m_host->registerMenuAction(m_host->editorContext, "Hello Plugin", "Help/Hello from Plugin",
                                        &HelloPlugin::menuAction, this);
@@ -34,11 +42,20 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<HelloPlugin*>(userData);
-        ImGui::TextUnformatted("Ola do plugin Caffeine!");
-        ImGui::TextDisabled("Version %s", self->GetVersion());
-        if (ImGui::Button("Log to console")) {
+        using namespace Caffeine::UIKit;
+        PanelHeader("Hello Plugin", "Plugin SDK sample", "hello");
+        Paragraph("Ola do plugin Caffeine!");
+        Badge(self->GetVersion(), tokens().accent);
+        TextMuted("The panel is rendered with the public Caffeine UI kit.");
+        SeparatorSpaced();
+        if (PrimaryButton("Log to console")) {
             if (self->m_host && self->m_host->logInfo) {
                 self->m_host->logInfo(self->m_host->editorContext, "Hello Plugin button clicked");
+            }
+        }
+        if (ToolbarButton("Secondary action", "Uses the shared widget vocabulary")) {
+            if (self->m_host && self->m_host->logInfo) {
+                self->m_host->logInfo(self->m_host->editorContext, "Hello Plugin secondary action");
             }
         }
 #else

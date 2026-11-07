@@ -1,6 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginServices.hpp"
-#include "editor/EditorContext.hpp"
+#include "caffeine/plugin/PluginUI.hpp"
 #include "ecs/TerrainComponents.hpp"
 #include "TerrainBridge.hpp"
 
@@ -9,29 +9,34 @@
 
 namespace {
 
+const Caffeine::Editor::PluginHostApi* hostFrom(void* context) {
+    return static_cast<const Caffeine::Editor::PluginHostApi*>(context);
+}
+
 bool terrainGenerateUltra(void* editorContext, const void* request, std::size_t requestSize,
                           void* response, std::size_t responseSize) {
     (void)response;
     (void)responseSize;
-    if (!editorContext || !request || requestSize < sizeof(Caffeine::Editor::TerrainGenerateUltraRequest)) {
+    if (!editorContext || !request ||
+        requestSize < sizeof(Caffeine::Editor::TerrainGenerateUltraRequest)) {
         return false;
     }
-    auto* ctx = static_cast<Caffeine::Editor::EditorContext*>(editorContext);
-    if (!ctx->activeWorld) return false;
+    const auto* host = hostFrom(editorContext);
+    Caffeine::ECS::World* world = Caffeine::Editor::PluginActiveWorld(host);
+    if (!world) return false;
 
     const auto* req = static_cast<const Caffeine::Editor::TerrainGenerateUltraRequest*>(request);
-    Caffeine::ECS::World& world = *ctx->activeWorld;
-    Caffeine::ECS::Entity entity(req->entityId, &world);
-    if (!entity.isValid() || !world.has<Caffeine::ECS::TerrainComponent>(entity)) return false;
+    Caffeine::ECS::Entity entity(req->entityId, world);
+    if (!entity.isValid() || !world->has<Caffeine::ECS::TerrainComponent>(entity)) return false;
 
     std::string error;
     const bool ok = Caffeine::Editor::TerrainBridge::generateUltraRealistic(
-        world, entity, req->preset, req->seed, req->worldSizeMeters, req->gridSize, error);
+        *world, entity, req->preset, req->seed, req->worldSizeMeters, req->gridSize, error);
     if (!ok) {
         std::cerr << "[TerrainPlugin] terrain.generateUltra: " << error << '\n';
         return false;
     }
-    ctx->isDirty = true;
+    Caffeine::Editor::PluginMarkDirty(host);
     return true;
 }
 
@@ -43,22 +48,22 @@ bool terrainImportHeightmap(void* editorContext, const void* request, std::size_
         requestSize < sizeof(Caffeine::Editor::TerrainImportHeightmapRequest)) {
         return false;
     }
-    auto* ctx = static_cast<Caffeine::Editor::EditorContext*>(editorContext);
-    if (!ctx->activeWorld) return false;
+    const auto* host = hostFrom(editorContext);
+    Caffeine::ECS::World* world = Caffeine::Editor::PluginActiveWorld(host);
+    if (!world) return false;
 
     const auto* req = static_cast<const Caffeine::Editor::TerrainImportHeightmapRequest*>(request);
-    Caffeine::ECS::World& world = *ctx->activeWorld;
-    Caffeine::ECS::Entity entity(req->entityId, &world);
+    Caffeine::ECS::Entity entity(req->entityId, world);
     if (!entity.isValid()) return false;
 
     std::string error;
     const bool ok = Caffeine::Editor::TerrainBridge::importHeightmap(
-        world, entity, req->heightmapPath, req->worldSizeX, req->worldSizeZ, error);
+        *world, entity, req->heightmapPath, req->worldSizeX, req->worldSizeZ, error);
     if (!ok) {
         std::cerr << "[TerrainPlugin] terrain.importHeightmap: " << error << '\n';
         return false;
     }
-    ctx->isDirty = true;
+    Caffeine::Editor::PluginMarkDirty(host);
     return true;
 }
 

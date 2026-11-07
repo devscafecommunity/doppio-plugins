@@ -11,6 +11,7 @@ Each folder contains the plugin **source code** and a `CMakeLists.txt`. Build ag
 | Procedural Tools | `procedural_tools_plugin` | [procedural-tools](procedural-tools/) |
 | Post Processing | `post_processing_plugin` | [post-processing](post-processing/) |
 | Git | `git_plugin` | [git](git/) |
+| AI Development | `ai_development_plugin` | [ai-development](ai-development/) |
 
 ## Build all plugins
 
@@ -24,11 +25,19 @@ Artifacts land in `build/plugins/*.so`.
 
 ## Install into Doppio
 
+Doppio no longer builds or preloads plugins. Copy the artifacts into a plugin
+directory and enable only what you need from **Plugins → Plugin Manager**:
+
 ```bash
+# Per-project plugins
+cp build/plugins/*.so /path/to/project/plugins/
+
+# Or user-wide, next to the editor binary
 cp build/plugins/*.so /path/to/caffeine/build/plugins/
-# or next to the editor binary:
-cp build/plugins/*.so /path/to/caffeine/build/doppio/plugins/
 ```
+
+Enabled plugins are remembered per user under `~/.config/caffeine/plugins.cfg`.
+Nothing is loaded until you opt in.
 
 ## Community plugins
 

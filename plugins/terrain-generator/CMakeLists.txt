@@ -6,6 +6,7 @@ doppio_add_plugin(terrain_plugin
         src/main.cpp
         src/TerrainBridge.cpp
         src/TerrainPluginServices.cpp
+        src/TerrainEditorPanel.cpp
     PRIVATE_INCLUDE_DIRS
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     LINK_LIBRARIES
