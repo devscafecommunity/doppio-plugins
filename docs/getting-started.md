@@ -23,20 +23,22 @@ Output: `build/plugins/hello_plugin.so` (Linux) or `hello_plugin.dll` (Windows).
 
 ## Install
 
-Doppio scans the `plugins/` directory next to its executable:
+Copy the library into a discovered plugin directory:
 
 ```bash
-mkdir -p $CAFFEINE_ROOT/build/doppio/plugins
-cp build/plugins/hello_plugin.so $CAFFEINE_ROOT/build/doppio/plugins/
+mkdir -p $CAFFEINE_ROOT/build/plugins
+cp build/plugins/hello_plugin.so $CAFFEINE_ROOT/build/plugins/
 ```
 
 Launch Doppio:
 
 ```bash
-$CAFFEINE_ROOT/build/doppio/doppio
+$CAFFEINE_ROOT/build/doppio
 ```
 
-Open **Window → Plugins**, enable **Hello Plugin**, then find the **Hello Plugin** panel.
+Open **Plugins → Plugin Manager**, tick **Enabled** for **Hello Plugin**, then find
+the **Hello Plugin** panel. Plugins are never preloaded; the enable list is stored in
+`~/.config/caffeine/plugins.cfg`.
 
 ## Create your own plugin
 
@@ -57,7 +59,7 @@ All official plugins ship with **source code** under `plugins/`:
 cmake -B build -DCAFFEINE_ROOT=$CAFFEINE_ROOT -DIMGUI_DIR=$IMGUI_DIR \
   -DDOPPIO_PLUGINS_BUILD_TEMPLATE=OFF
 cmake --build build
-cp build/plugins/*.so $CAFFEINE_ROOT/build/doppio/plugins/
+cp build/plugins/*.so $CAFFEINE_ROOT/build/plugins/
 ```
 
 See the [plugin catalog](../plugins/README.md) for per-plugin details.
@@ -66,7 +68,7 @@ See the [plugin catalog](../plugins/README.md) for per-plugin details.
 
 | Problem | Fix |
 |---------|-----|
-| Plugin not listed | Check file is in `doppio/plugins/` and has `.so` / `.dll` extension |
+| Plugin not listed | Check the file is in a discovered `plugins/` directory and ends in `.so` / `.dll` |
 | `CreatePlugin` not found | Build with `CAFFEINE_PLUGIN_EXPORTS=1`; use `doppio_add_plugin()` |
 | ImGui headers missing | Set `-DIMGUI_DIR=.../imgui-src` from Caffeine's CMake fetch |
 | Crash on load | Mismatched Caffeine version — rebuild plugin against same tree |

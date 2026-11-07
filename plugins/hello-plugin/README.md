@@ -15,20 +15,20 @@ The smallest useful Doppio plugin — use it to verify your build pipeline and l
 ## Install
 
 ```bash
-# From Caffeine monorepo
+# From this repository
+cmake -B build \
+  -DCAFFEINE_ROOT=/path/to/caffeine \
+  -DIMGUI_DIR=/path/to/caffeine/build/_deps/imgui-src
 cmake --build build --target hello_plugin
-cp build/plugins/hello_plugin.so build/doppio/plugins/
-
-# Or from doppio-plugins template
-cmake -B build -DCAFFEINE_ROOT=../caffeine -DIMGUI_DIR=../caffeine/build/_deps/imgui-src
-cmake --build build
-cp build/plugins/hello_plugin.so /path/to/doppio/plugins/
+cp build/plugins/hello_plugin.so /path/to/caffeine/build/plugins/
 ```
+
+Then enable it in **Plugins → Plugin Manager**.
 
 ## Usage
 
 1. Launch Doppio
-2. **Window → Plugins** → enable **Hello Plugin**
+2. **Plugins → Plugin Manager** → enable **Hello Plugin**
 3. Open the **Hello Plugin** panel
 4. Click **Log to console**
 
@@ -36,7 +36,7 @@ cp build/plugins/hello_plugin.so /path/to/doppio/plugins/
 
 | Location | Path |
 |----------|------|
-| Caffeine monorepo | `apps/plugins/hello_plugin/main.cpp` |
+| This repo | `plugins/hello-plugin/src/main.cpp` |
 | This repo (template) | `templates/hello-plugin/` |
 
 ## Dependencies

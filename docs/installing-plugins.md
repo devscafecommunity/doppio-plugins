@@ -1,20 +1,22 @@
 # Installing plugins
 
-Doppio discovers plugins at startup by scanning for shared libraries in a `plugins/` directory.
+Doppio discovers shared libraries in a few well-known `plugins/` directories but
+**loads none of them at startup**. Discovered libraries are listed in the Plugin
+Manager and stay disabled until enabled.
 
-## Default locations
+## Discovery locations
 
-| Platform | Path (relative to Doppio binary) |
-|----------|----------------------------------|
-| Linux | `./plugins/*.so` |
-| Windows | `./plugins/*.dll` |
-| macOS | `./plugins/*.dylib` |
+| Scope | Path |
+|-------|------|
+| Project | `<project-root>/plugins/*.so` (`*.dll` on Windows) |
+| Doppio build | `<caffeine-build>/plugins/*.so` |
+| Next to the binary | `<doppio-binary-dir>/plugins/*.so` |
 
 Example after a typical Caffeine build:
 
 ```
-caffeine/build/doppio/
-├── doppio                  ← editor executable
+caffeine/build/
+├── doppio
 └── plugins/
     ├── hello_plugin.so
     ├── terrain_plugin.so
@@ -27,46 +29,34 @@ caffeine/build/doppio/
 cp /path/to/built/my_plugin.so /path/to/doppio/plugins/
 ```
 
-Restart Doppio or use **Window → Plugins** to reload.
-
-## Build-time bundling (developers)
-
-From the Caffeine CMake configure step:
-
-```bash
-cmake -DCAFFEINE_BUNDLE_DEFAULT_PLUGINS=ON ..
-cmake --build . --target doppio
-```
-
-This copies default plugins into `doppio/plugins/` automatically. Default is **OFF** for a lean IDE distribution.
+Restart Doppio or press **Refresh Directory** in **Plugins → Plugin Manager**.
 
 ## Enabling and disabling
 
-1. Open **Window → Plugins**
-2. Toggle plugins on/off
-3. Disabled plugins are not unloaded from disk but their UI is not registered
+1. Open **Plugins → Plugin Manager**.
+2. Tick **Enabled** next to a library to load it and register its panels, menus,
+   drawers and services.
+3. Untick it (or press **Unload**) to remove its contributions and unload the
+   library.
+
+The enable list is written to `~/.config/caffeine/plugins.cfg`
+(`$XDG_CONFIG_HOME/caffeine/plugins.cfg` when set, `%APPDATA%/Caffeine` on Windows).
+Each line is a library stem; comments start with `#`.
+
+```
+# enabled plugins
+terrain_plugin
+git_plugin
+```
 
 ## Distribution
 
-For end users, ship a zip with:
+Ship the `.so`/`.dll` files and a short readme. Do not modify the engine tree.
+For a team default, distribute a `plugins.cfg` that developers copy into their user
+config; each user can still disable plugins locally.
 
-```
-MyGameEditor/
-├── doppio
-├── plugins/
-│   ├── terrain_plugin.so
-│   └── post_processing_plugin.so
-└── README.txt
-```
+## Compatibility
 
-Document external dependencies per plugin (Node.js for terrain, `git` for Git plugin, etc.).
-
-## Version compatibility
-
-Plugins are **not** guaranteed ABI-stable across major Caffeine releases. Pin a tested engine version in your plugin README:
-
-```markdown
-## Tested with
-- Caffeine Engine: commit `abc123` or tag `v0.4.0`
-- Doppio: bundled with same release
-```
+Plugins are compiled against the public headers in `include/caffeine/plugin/`. Keep
+the ABI aligned with the engine; a plugin built for a different ABI may fail to load
+or crash. Use the same compiler and standard library as Doppio on Linux.

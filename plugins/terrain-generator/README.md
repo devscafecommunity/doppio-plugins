@@ -26,8 +26,8 @@ Algorithm assets: `assets/general-ultra-realistic-terrain-algorithm/` in the Caf
 ## Install
 
 ```bash
-cmake --build /path/to/caffeine/build --target terrain_plugin
-cp build/plugins/terrain_plugin.so build/doppio/plugins/
+cmake --build /path/to/doppio-plugins/build --target terrain_plugin
+cp build/plugins/terrain_plugin.so build/plugins/
 ```
 
 ## Usage
@@ -49,7 +49,7 @@ See [service registry](../../docs/service-registry.md).
 ## Source
 
 ```
-apps/plugins/terrain_plugin/
+plugins/terrain-generator/src/
 ├── main.cpp
 ├── TerrainBridge.cpp
 └── TerrainPluginServices.cpp

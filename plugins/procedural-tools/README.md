@@ -27,8 +27,8 @@ Script templates: `assets/plugins/procedural/scripts/` in Caffeine.
 ## Install
 
 ```bash
-cmake --build /path/to/caffeine/build --target procedural_tools_plugin
-cp build/plugins/procedural_tools_plugin.so build/doppio/plugins/
+cmake --build /path/to/doppio-plugins/build --target procedural_tools_plugin
+cp build/plugins/procedural_tools_plugin.so build/plugins/
 ```
 
 ## Usage
@@ -50,7 +50,7 @@ cp build/plugins/procedural_tools_plugin.so build/doppio/plugins/
 ## Source
 
 ```
-apps/plugins/procedural_tools_plugin/
+plugins/procedural-tools/src/
 ├── main.cpp
 ├── ProceduralBridge.cpp
 └── ProceduralPluginServices.cpp

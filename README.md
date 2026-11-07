@@ -2,7 +2,7 @@
 
 Official and community **plugins for [Doppio](https://github.com/caffeine-engine/caffeine)** — the editor for the Caffeine Engine.
 
-Doppio is intentionally lean: terrain tools, post-processing UI, procedural streaming, Git integration, and other feature panels ship as **dynamic libraries** (`.so` / `.dll`) loaded at runtime from a `plugins/` folder next to the editor binary.
+Doppio is intentionally lean: terrain tools, post-processing UI, procedural streaming, Git integration, and other feature panels ship as **dynamic libraries** (`.so` / `.dll`). Doppio discovers them in a `plugins/` directory but only loads the ones the user enables in the Plugin Manager.
 
 This repository is the public home for:
 
@@ -39,10 +39,11 @@ cmake --build build
 Copy the built `.so` / `.dll` into Doppio's plugins directory:
 
 ```bash
-cp build/plugins/*.so /path/to/caffeine/build/doppio/plugins/
+cp build/plugins/*.so /path/to/caffeine/build/plugins/
 ```
 
-Restart Doppio (or use **Window → Plugins** to enable the plugin).
+Restart Doppio and enable the plugin in **Plugins → Plugin Manager**. Nothing is
+preloaded: only libraries in the user's enable list are loaded.
 
 ## Repository layout
 
@@ -65,7 +66,8 @@ doppio-plugins/
     ├── terrain-generator/src/
     ├── procedural-tools/src/
     ├── post-processing/src/
-    └── git/src/
+    ├── git/src/
+    └── ai-development/src/
 ```
 
 ## Official plugin catalog
@@ -77,6 +79,7 @@ doppio-plugins/
 | [Procedural Tools](plugins/procedural-tools/) | `procedural_tools_plugin` | Modular streaming + Lua directors |
 | [Post Processing](plugins/post-processing/) | `post_processing_plugin` | Post-process stack UI for cameras |
 | [Git](plugins/git/) | `git_plugin` | Optional Git workflow panel |
+| [AI Development](plugins/ai-development/) | `ai_development_plugin` | NPC navigation and behaviour authoring |
 
 Each plugin folder contains `src/` and `CMakeLists.txt`. Build everything from this repo:
 
@@ -84,10 +87,11 @@ Each plugin folder contains `src/` and `CMakeLists.txt`. Build everything from t
 cmake -B build -DCAFFEINE_ROOT=/path/to/caffeine \
   -DIMGUI_DIR=/path/to/caffeine/build/_deps/imgui-src
 cmake --build build
-cp build/plugins/*.so /path/to/caffeine/build/doppio/plugins/
+cp build/plugins/*.so /path/to/caffeine/build/plugins/
 ```
 
-The Caffeine monorepo still mirrors the same sources under `apps/plugins/` for in-tree builds.
+The engine CMake does **not** build these plugins. This repository is the only
+source of truth; it is included in the engine as the `doppio-plugins` submodule.
 
 ## Writing your own plugin
 

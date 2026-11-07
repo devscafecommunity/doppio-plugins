@@ -24,8 +24,8 @@ Editor UI for the modular post-process stack on camera entities.
 ## Install
 
 ```bash
-cmake --build /path/to/caffeine/build --target post_processing_plugin
-cp build/plugins/post_processing_plugin.so build/doppio/plugins/
+cmake --build /path/to/doppio-plugins/build --target post_processing_plugin
+cp build/plugins/post_processing_plugin.so build/plugins/
 ```
 
 ## Usage
@@ -38,7 +38,7 @@ cp build/plugins/post_processing_plugin.so build/doppio/plugins/
 ## Source
 
 ```
-apps/plugins/post_processing_plugin/main.cpp
+plugins/post-processing/src/main.cpp
 ```
 
 ## Notes

@@ -28,21 +28,21 @@ Git workflow integration for Caffeine projects. Requires the `git` CLI in `PATH`
 ## Install
 
 ```bash
-cmake --build /path/to/caffeine/build --target git_plugin
-cp build/plugins/git_plugin.so build/doppio/plugins/
+cmake --build /path/to/doppio-plugins/build --target git_plugin
+cp build/plugins/git_plugin.so build/plugins/
 ```
 
 ## Usage
 
 - Menu: **Version Control → Git Panel**
-- Or enable in **Window → Plugins**
+- Or enable in **Plugins → Plugin Manager**
 
 Project root is resolved via `PluginHostApi::getProjectRootPath` (parent directory of `scenes/`).
 
 ## Source
 
 ```
-apps/plugins/git_plugin/
+plugins/git/src/
 ├── main.cpp
 └── GitRunner.cpp
 ```
