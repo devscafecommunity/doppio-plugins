@@ -1,12 +1,17 @@
+#include "AoBaker.hpp"
 #include "caffeine/photon/Photon.hpp"
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
 
 #include "ecs/ComponentQuery.hpp"
+#include "ecs/MeshComponents.hpp"
 #include "ecs/World.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <vector>
 
 #ifdef CF_HAS_IMGUI
 #include <imgui.h>
@@ -192,6 +197,82 @@ private:
         openPanel(self);
     }
 
+    static void bakeSelectedAO(PhotonPlugin* self, Caffeine::ECS::World& world) {
+        const Caffeine::ECS::Entity selected =
+            Caffeine::Editor::PluginSelectedEntity(self->m_host, &world);
+        if (!selected.isValid()) {
+            self->m_aoStatus = "Select a mesh entity to bake.";
+            return;
+        }
+        Caffeine::PhotonAOBake::Settings settings;
+        settings.resolution = self->m_aoResolution == 0 ? 256u
+                              : self->m_aoResolution == 2 ? 1024u
+                                                           : 512u;
+        settings.rays = static_cast<Caffeine::u32>(
+            std::clamp(static_cast<int>(self->m_aoRays), 1, 64));
+        settings.maxDistance = std::max(self->m_aoMaxDistance, 0.01f);
+        settings.bias = std::max(self->m_aoBias, 0.0f);
+        const std::filesystem::path projectRoot =
+            Caffeine::Editor::PluginProjectRoot(self->m_host);
+        if (self->m_host && self->m_host->logInfo) {
+            self->m_host->logInfo(self->m_host->editorContext,
+                                  "Photon: baking ambient occlusion...");
+        }
+        const auto result = Caffeine::PhotonAOBake::bake(
+            world, selected, settings, projectRoot.string());
+        if (result.ok) {
+            char buffer[256];
+            std::snprintf(buffer, sizeof(buffer),
+                          "Baked AO: %u/%u texels, %u triangles. ORM: %s", result.coveredTexels,
+                          settings.resolution * settings.resolution, result.triangles,
+                          result.ormPath.c_str());
+            self->m_aoStatus = buffer;
+            markDirty(self);
+            Caffeine::Editor::PluginMarkAssetBrowserDirty(self->m_host);
+        } else {
+            self->m_aoStatus = "Bake failed: " + result.error;
+            if (self->m_host && self->m_host->logError) {
+                self->m_host->logError(self->m_host->editorContext,
+                                       self->m_aoStatus.c_str());
+            }
+        }
+    }
+
+    static void bakeSceneAO(PhotonPlugin* self, Caffeine::ECS::World& world) {
+        Caffeine::PhotonAOBake::Settings settings;
+        settings.resolution = self->m_aoResolution == 0 ? 256u
+                              : self->m_aoResolution == 2 ? 1024u
+                                                           : 512u;
+        settings.rays = static_cast<Caffeine::u32>(
+            std::clamp(static_cast<int>(self->m_aoRays), 1, 64));
+        settings.maxDistance = std::max(self->m_aoMaxDistance, 0.01f);
+        settings.bias = std::max(self->m_aoBias, 0.0f);
+        const std::filesystem::path projectRoot =
+            Caffeine::Editor::PluginProjectRoot(self->m_host);
+
+        std::vector<Caffeine::ECS::Entity> targets;
+        Caffeine::ECS::ComponentQuery query;
+        query.with<Caffeine::ECS::MeshFilterComponent>();
+        world.forEach<Caffeine::ECS::MeshFilterComponent>(
+            query, [&](Caffeine::ECS::Entity entity, Caffeine::ECS::MeshFilterComponent&) {
+                targets.push_back(entity);
+            });
+
+        Caffeine::u32 baked = 0;
+        Caffeine::u32 failed = 0;
+        for (Caffeine::ECS::Entity entity : targets) {
+            const auto result = Caffeine::PhotonAOBake::bake(
+                world, entity, settings, projectRoot.string());
+            if (result.ok) ++baked;
+            else ++failed;
+        }
+        char buffer[256];
+        std::snprintf(buffer, sizeof(buffer), "Baked %u mesh(es), %u failed.", baked, failed);
+        self->m_aoStatus = buffer;
+        markDirty(self);
+        Caffeine::Editor::PluginMarkAssetBrowserDirty(self->m_host);
+    }
+
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<PhotonPlugin*>(userData);
@@ -283,6 +364,27 @@ private:
             if (changed) markDirty(self);
         }
 
+        if (Section("Baked ambient occlusion")) {
+            TextMuted("Precomputed static AO written to the material ORM map. No RTX required.");
+            if (BeginPropertyGrid("photon_ao")) {
+                static const char* const kResolutions[] = {"256", "512", "1024"};
+                ComboProperty("Resolution", &self->m_aoResolution, kResolutions, 3);
+                SliderFloatProperty("Rays", &self->m_aoRays, 1.0f, 64.0f, "%.0f");
+                DragFloatProperty("Max distance", &self->m_aoMaxDistance, 0.1f, 0.05f, 50.0f);
+                DragFloatProperty("Bias", &self->m_aoBias, 0.001f, 0.0f, 0.2f);
+                EndPropertyGrid();
+            }
+            if (ToolbarButton("Bake selected mesh", "Bake AO into the selected mesh material")) {
+                bakeSelectedAO(self, *world);
+            }
+            SameLine();
+            if (ToolbarButton("Bake scene", "Bake AO for every static mesh in the scene")) {
+                bakeSceneAO(self, *world);
+            }
+            TextMuted("The bake blocks the editor briefly on large meshes.");
+            if (!self->m_aoStatus.empty()) TextMuted(self->m_aoStatus.c_str());
+        }
+
         SeparatorSpaced();
         TextMuted("Near field: screen-space cascades. Far field: sky/ambient fallback.");
         TextMutedF("Target entity: %u", target.id());
@@ -321,6 +423,11 @@ private:
 
     const Caffeine::Editor::PluginHostApi* m_host = nullptr;
     int m_preset = PresetBalanced;
+    int m_aoResolution = 1;
+    float m_aoRays = 16.0f;
+    float m_aoMaxDistance = 2.5f;
+    float m_aoBias = 0.02f;
+    std::string m_aoStatus;
 };
 
 }  // namespace
