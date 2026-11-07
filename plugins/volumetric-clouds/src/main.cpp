@@ -351,8 +351,7 @@ private:
         if (!clouds) return;
         using namespace Caffeine::UIKit;
 
-        bool changed = Toggle("Enabled##vcm", &clouds->enabled);
-        SameLine();
+        bool changed = false;
         TextMuted(classify(*clouds));
 
         if (BeginPropertyGrid("vcm_component")) {
