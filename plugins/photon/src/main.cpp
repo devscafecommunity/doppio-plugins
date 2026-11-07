@@ -224,9 +224,13 @@ private:
         TextMuted(classify(*gi));
 
         if (Section("Presets", true)) {
-            if (ComboProperty("Quality preset", &self->m_preset, kPresetNames, PresetCount)) {
-                applyPreset(self->m_preset, *gi);
-                markDirty(self);
+            if (BeginPropertyGrid("photon_presets")) {
+                if (ComboProperty("Quality preset", &self->m_preset, kPresetNames,
+                                  PresetCount)) {
+                    applyPreset(self->m_preset, *gi);
+                    markDirty(self);
+                }
+                EndPropertyGrid();
             }
             if (ToolbarButton("Apply", "Apply the selected preset")) {
                 applyPreset(self->m_preset, *gi);
