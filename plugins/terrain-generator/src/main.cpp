@@ -2,7 +2,6 @@
 #include "caffeine/plugin/PluginUI.hpp"
 #include "ecs/TerrainComponents.hpp"
 #include "TerrainBridge.hpp"
-#include "TerrainEditorPanel.hpp"
 
 extern "C" void caffeine_terrain_plugin_register_services(
     const Caffeine::Editor::PluginHostApi* host);
@@ -32,16 +31,6 @@ public:
         Caffeine::Editor::RegisterPluginPanel(
             m_host, GetName(), info, &TerrainGeneratorPlugin::renderPanel, this);
 
-        Caffeine::Editor::PluginPanelInfo editor;
-        editor.id = "plugin.terrain.editor";
-        editor.title = "Terrain Editor";
-        editor.icon = "terrain";
-        editor.dock = Caffeine::Editor::PluginDockArea::Bottom;
-        editor.size = 0.28f;
-        editor.defaultOpen = true;
-        Caffeine::Editor::RegisterPluginPanel(
-            m_host, GetName(), editor, &Caffeine::Plugins::Terrain::renderTerrainEditor,
-            const_cast<Caffeine::Editor::PluginHostApi*>(m_host));
     }
 
     void OnUnload() override {}

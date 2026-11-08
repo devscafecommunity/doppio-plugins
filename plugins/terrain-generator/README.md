@@ -6,6 +6,12 @@
 
 Ultra-realistic procedural terrain for Caffeine scenes. Generation runs outside the editor core via a Node.js pipeline with domain warping and geomorphological PDEs.
 
+
+> **Terrain editing is native.** Sculpting, splat painting, undo and
+> `.cterrain` import/export live in Doppio's **View → Terrain Editor**.
+> This plugin only generates terrain and imports heightmaps; it does not
+> register an editor panel.
+
 ## Features
 
 - Presets: `default`, `alpine`, `mesa`, `volcanic`, `glacial`, `blend`
