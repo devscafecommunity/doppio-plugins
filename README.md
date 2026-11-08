@@ -68,7 +68,8 @@ doppio-plugins/
     ├── post-processing/src/
     ├── git/src/
     ├── ai-development/src/
-    └── volumetric-clouds/src/
+    ├── volumetric-clouds/src/
+    └── natural-fluids/src/
 ```
 
 ## Official plugin catalog
@@ -82,6 +83,7 @@ doppio-plugins/
 | [Git](plugins/git/) | `git_plugin` | Optional Git workflow panel |
 | [AI Development](plugins/ai-development/) | `ai_development_plugin` | NPC navigation and behaviour authoring |
 | [VC&M](plugins/volumetric-clouds/) | `volumetric_clouds_plugin` | Procedural volumetric clouds and ground mist |
+| [Natural Fluids](plugins/natural-fluids/) | `natural_fluids_plugin` | Water surfaces and real 2D/3D water, fire, fog and smoke fluids |
 
 Each plugin folder contains `src/` and `CMakeLists.txt`. Build everything from this repo:
 
