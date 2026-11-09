@@ -1,7 +1,7 @@
 #include "caffeine/environment/NaturalFluids.hpp"
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
-#include "caffeine/ui/Widgets.hpp"
+#include "caffeine/ui/UI.hpp"
 
 #include "ecs/Components.hpp"
 #include "ecs/Components3D.hpp"
@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -192,13 +193,12 @@ ImU32 previewColor(Caffeine::f32 density, Caffeine::f32 temperature, int preset)
 }
 
 void drawSurfacePreview(const Caffeine::Fluids::FluidWorld& fluid,
-                        const NaturalFluidComponent& component, ImVec2 size) {
+                        const NaturalFluidComponent& component, ImDrawList* drawList,
+                        const ImVec2& origin, const ImVec2& size) {
     const int cells = 56;
     const Caffeine::f32 halfX = component.sizeX * 0.5f;
     const Caffeine::f32 halfZ = component.sizeZ * 0.5f;
     const Caffeine::f32 scale = std::max(fluid.waves().significantWaveHeight(), 0.25f);
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
                             IM_COL32(8, 12, 20, 255));
     const ImVec2 cellSize(size.x / cells, size.y / cells);
@@ -222,14 +222,12 @@ void drawSurfacePreview(const Caffeine::Fluids::FluidWorld& fluid,
     }
     drawList->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y),
                       IM_COL32(70, 82, 100, 255));
-    ImGui::Dummy(size);
 }
 
 void draw2DPreview(const Caffeine::Fluids::EulerFluid2D& fluid,
-                   const NaturalFluidComponent& component, ImVec2 size) {
+                   const NaturalFluidComponent& component, ImDrawList* drawList,
+                   const ImVec2& origin, const ImVec2& size) {
     const int n = fluid.resolution();
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
                             IM_COL32(5, 6, 9, 255));
     const ImVec2 cellSize(size.x / n, size.y / n);
@@ -247,16 +245,14 @@ void draw2DPreview(const Caffeine::Fluids::EulerFluid2D& fluid,
     }
     drawList->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y),
                       IM_COL32(70, 82, 100, 255));
-    ImGui::Dummy(size);
 }
 
 void drawVolumePreview(const Caffeine::Fluids::FluidVolume& volume,
-                       const NaturalFluidComponent& component, ImVec2 size) {
+                       const NaturalFluidComponent& component, ImDrawList* drawList,
+                       const ImVec2& origin, const ImVec2& size) {
     const int nx = volume.resolutionX();
     const int ny = volume.resolutionY();
     const int nz = volume.resolutionZ();
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(origin, ImVec2(origin.x + size.x, size.y + origin.y),
                             IM_COL32(5, 6, 9, 255));
 
@@ -288,7 +284,6 @@ void drawVolumePreview(const Caffeine::Fluids::FluidVolume& volume,
                           ImVec2(paneOrigin.x + panelSize.x, paneOrigin.y + panelSize.y),
                           IM_COL32(70, 82, 100, 255));
     }
-    ImGui::Dummy(size);
 }
 #endif
 
@@ -321,16 +316,19 @@ public:
 private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
+        using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::UI;
+
         auto* self = static_cast<NaturalFluidsPlugin*>(userData);
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
         if (!world) {
             Caffeine::UIKit::EmptyState("No active scene",
-                                        "Open or create a scene to add Natural Fluids.", "effects");
+                       "Open or create a scene to add Natural Fluids.", "effects");
             return;
         }
 
-        using namespace Caffeine::UIKit;
-        PanelHeader("Natural Fluids", "Water surfaces and real fluids", "effects");
+        UIContext ctx;
+        Column root("natural_fluids_root");
 
         Caffeine::ECS::Entity entity =
             Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
@@ -338,207 +336,279 @@ private:
             entity.isValid() && world->has<NaturalFluidComponent>(entity);
 
         if (!hasComponent) {
-            TextMuted("Select an entity with Natural Fluids, or create one below.");
-            SeparatorSpaced();
-            if (PrimaryButton("Create realistic water surface")) {
-                entity = createFluidEntity(self->m_host, *world,
-                                           static_cast<int>(NaturalFluidMode::RealisticWater));
-            }
-            if (ToolbarButton("Flat water", "Add a flat water plane")) {
+            auto& card = root.emplace<Card>("create");
+            card.emplace<Label>("Natural Fluids", TextTone::Accent).setHeading(true);
+            card.emplace<UI::Paragraph>(
+                "Select an entity with Natural Fluids, or create a water surface / fluid volume.");
+            auto& actions = card.emplace<Row>("create_actions");
+            actions.emplace<Button>("Realistic water", ButtonVariant::Primary)
+                .setOnClick([&] {
+                    entity = createFluidEntity(self->m_host, *world,
+                                               static_cast<int>(NaturalFluidMode::RealisticWater));
+                });
+            actions.emplace<Button>("Flat water").setOnClick([&] {
                 entity = createFluidEntity(self->m_host, *world,
                                            static_cast<int>(NaturalFluidMode::FlatWater));
-            }
-            if (ToolbarButton("Wind + physics", "Add wind waves with shallow-water physics")) {
+            });
+            actions.emplace<Button>("Wind + physics").setOnClick([&] {
                 entity = createFluidEntity(self->m_host, *world,
                                            static_cast<int>(NaturalFluidMode::WindWater));
-            }
-            if (ToolbarButton("Fluid volume", "Add a real 3D fluid volume")) {
+            });
+            actions.emplace<Button>("Fluid volume").setOnClick([&] {
                 entity = createFluidEntity(self->m_host, *world,
                                            static_cast<int>(NaturalFluidMode::FluidVolume));
+            });
+            if (entity.isValid()) {
+                card.emplace<Button>("Add Natural Fluids to selected entity",
+                                     ButtonVariant::Primary)
+                    .setOnClick([&] {
+                        NaturalFluidComponent component =
+                            makeComponent(static_cast<int>(NaturalFluidMode::RealisticWater));
+                        ensureRenderComponents(*world, entity, component);
+                        world->add<NaturalFluidComponent>(entity, component);
+                        Caffeine::Editor::PluginMarkDirty(self->m_host);
+                    });
             }
-            SeparatorSpaced();
-            if (entity.isValid() && PrimaryButton("Add Natural Fluids to selected entity")) {
-                NaturalFluidComponent component =
-                    makeComponent(static_cast<int>(NaturalFluidMode::RealisticWater));
-                ensureRenderComponents(*world, entity, component);
-                world->add<NaturalFluidComponent>(entity, component);
-                Caffeine::Editor::PluginMarkDirty(self->m_host);
-            }
+            ctx.draw(root);
             return;
         }
 
         NaturalFluidComponent* component = world->get<NaturalFluidComponent>(entity);
         if (!component) return;
 
+        const NaturalFluidComponent before = *component;
+        const int mode = static_cast<int>(component->mode);
+        const bool volumeMode = mode == static_cast<int>(NaturalFluidMode::FluidVolume);
+
+        int level = mode;
+        int preset = static_cast<int>(component->preset);
+        int surfaceResolution = static_cast<int>(component->surfaceResolution);
+        int simulationResolution = static_cast<int>(component->simulationResolution);
+        int fluidResolution = static_cast<int>(component->fluidResolution);
+        bool shallow = component->shallowPhysics != 0;
+        bool preview = component->previewInEditor != 0;
+        bool renderVolume = component->renderVolume != 0;
+        bool simulateFluid2D = component->simulateFluid2D != 0;
+        float color[4] = {component->albedoR, component->albedoG, component->albedoB,
+                          component->albedoA};
+
+        {
+            auto& card = root.emplace<Card>("level");
+            card.emplace<Label>("Simulation", TextTone::Accent).setHeading(true);
+            auto& grid = card.emplace<PropertyGrid>("level_grid");
+            grid.typedRow<ChoiceProperty>(
+                "Level", level,
+                std::vector<std::string>{kModeNames[0], kModeNames[1], kModeNames[2],
+                                         kModeNames[3]});
+            if (volumeMode) {
+                grid.typedRow<ChoiceProperty>(
+                    "Fluid", preset,
+                    std::vector<std::string>{kPresetNames[0], kPresetNames[1],
+                                             kPresetNames[2], kPresetNames[3]});
+            }
+        }
+
+        {
+            auto& card = root.emplace<Card>("properties");
+            card.emplace<Label>("Properties", TextTone::Accent).setHeading(true);
+            auto& grid = card.emplace<PropertyGrid>("properties_grid");
+            if (!volumeMode) {
+                grid.typedRow<FloatProperty>("Size X (m)", component->sizeX, 8.0f, 2048.0f,
+                                             1.0f, "%.0f");
+                grid.typedRow<FloatProperty>("Size Z (m)", component->sizeZ, 8.0f, 2048.0f,
+                                             1.0f, "%.0f");
+                grid.typedRow<FloatProperty>("Water level", component->waterLevel,
+                                             -1000.0f, 1000.0f, 0.05f, "%.2f");
+                grid.typedRow<FloatProperty>("Amplitude", component->amplitudeScale, 0.0f,
+                                             3.0f, 0.01f, "%.2f", true);
+                grid.typedRow<FloatProperty>("Choppiness", component->choppiness, 0.0f, 1.0f,
+                                             0.01f, "%.2f", true);
+                grid.typedRow<FloatProperty>("Wind speed (m/s)", component->windSpeed, 0.0f,
+                                             60.0f, 0.2f, "%.1f");
+                grid.typedRow<FloatProperty>("Wind direction",
+                                             component->windDirectionDeg, 0.0f, 360.0f, 1.0f,
+                                             "%.0f deg", true);
+                grid.typedRow<FloatProperty>("Wavelength", component->wavelengthScale, 0.1f,
+                                             4.0f, 0.01f, "%.2f", true);
+                grid.typedRow<FloatProperty>("Foam threshold", component->foamThreshold, 0.0f,
+                                             1.0f, 0.01f, "%.2f", true);
+                grid.typedRow<BoolProperty>("Shallow physics", shallow);
+                grid.typedRow<IntProperty>("Physics grid", simulationResolution, 16, 192,
+                                           1.0f, "%d", true);
+                grid.typedRow<IntProperty>("Mesh resolution", surfaceResolution, 16, 256,
+                                           1.0f, "%d", true);
+                grid.typedRow<BoolProperty>("2D fluid preview", simulateFluid2D);
+            } else {
+                grid.typedRow<FloatProperty>("Size X (m)", component->sizeX, 2.0f, 128.0f,
+                                             0.5f, "%.1f");
+                grid.typedRow<FloatProperty>("Size Y (m)", component->sizeY, 2.0f, 128.0f,
+                                             0.5f, "%.1f");
+                grid.typedRow<FloatProperty>("Size Z (m)", component->sizeZ, 2.0f, 128.0f,
+                                             0.5f, "%.1f");
+                grid.typedRow<IntProperty>("Volume grid", fluidResolution, 12, 48, 1.0f,
+                                           "%d", true);
+                grid.typedRow<FloatProperty>("Source rate", component->fluidSourceRate, 0.0f,
+                                             4.0f, 0.02f, "%.2f");
+                grid.typedRow<FloatProperty>("Source radius", component->fluidSourceRadius,
+                                             0.2f, 12.0f, 0.1f, "%.2f");
+                grid.typedRow<FloatProperty>("Source heat",
+                                             component->fluidSourceTemperature, 0.0f, 6.0f,
+                                             0.05f, "%.2f");
+                grid.typedRow<FloatProperty>("Fluid wind", component->fluidWindSpeed, 0.0f,
+                                             20.0f, 0.1f, "%.2f");
+                grid.typedRow<FloatProperty>("Fluid wind dir",
+                                             component->fluidWindDirectionDeg, 0.0f, 360.0f,
+                                             1.0f, "%.0f deg", true);
+                grid.typedRow<FloatProperty>("Emission", component->fluidEmission, 0.0f,
+                                             20.0f, 0.1f, "%.2f");
+                grid.typedRow<BoolProperty>("Render density voxels", renderVolume);
+            }
+            grid.typedRow<FloatProperty>("Time scale", component->timeScale, 0.0f, 4.0f,
+                                         0.01f, "%.2f", true);
+            grid.typedRow<BoolProperty>("Animate in editor", preview);
+            grid.typedRow<ColorFieldProperty>("Surface colour", color);
+            grid.typedRow<FloatProperty>("Roughness", component->roughness, 0.02f, 1.0f,
+                                         0.01f, "%.2f", true);
+        }
+
+        auto* fluidWorld = Caffeine::Scene::naturalFluidWorldForEdit(*world, entity.id());
+        {
+            auto& card = root.emplace<Card>("preview");
+            card.emplace<Label>("Preview", TextTone::Accent).setHeading(true);
+            if (!fluidWorld) {
+                card.emplace<Label>("Simulation starts on the next editor frame.",
+                                    TextTone::Muted);
+            } else {
+                auto& actions = card.emplace<Row>("preview_actions");
+                actions.emplace<Button>("Drop water", ButtonVariant::Toolbar)
+                    .setOnClick([fluidWorld, component] {
+                        fluidWorld->addWaterDrop(0.0f, 0.0f, 32.0f,
+                                                 component->shallowDepth * 3.0f);
+                    });
+                actions.emplace<Button>("Impulse", ButtonVariant::Toolbar)
+                    .setOnClick([fluidWorld] {
+                        fluidWorld->addWaterImpulse(0.0f, 0.0f, 6.0f, 0.0f, 5.0f);
+                    });
+                actions.emplace<Button>("Puff", ButtonVariant::Toolbar)
+                    .setOnClick([fluidWorld, component, volumeMode] {
+                        if (volumeMode) {
+                            fluidWorld->addVolumeSource(
+                                component->sizeX * 0.5f, component->sizeY * 0.16f,
+                                component->sizeZ * 0.5f, 1.0f,
+                                component->fluidSourceRadius);
+                            if (component->preset !=
+                                static_cast<Caffeine::u8>(NaturalFluidPreset::Water)) {
+                                fluidWorld->volume().addTemperature(
+                                    component->sizeX * 0.5f, component->sizeY * 0.16f,
+                                    component->sizeZ * 0.5f, 2.0f,
+                                    component->fluidSourceRadius);
+                            }
+                        } else {
+                            fluidWorld->addFluidSource(component->sizeX * 0.5f,
+                                                       component->sizeZ * 0.18f, 1.0f, 3.0f);
+                        }
+                    });
+                actions.emplace<Button>("Reset", ButtonVariant::Toolbar)
+                    .setOnClick([world, entity] {
+                        Caffeine::Scene::resetNaturalFluid(*world, entity.id());
+                    });
+
+                auto& canvas = card.emplace<Canvas>("preview_canvas");
+                canvas.setHeight(220.0f);
+                if (volumeMode) {
+                    char stats[128];
+                    std::snprintf(stats, sizeof(stats), "3D grid %dx%dx%d",
+                                  fluidWorld->volume().resolutionX(),
+                                  fluidWorld->volume().resolutionY(),
+                                  fluidWorld->volume().resolutionZ());
+                    card.emplace<Label>(stats, TextTone::Muted);
+                    canvas.setOnDraw([fluidWorld, component](UIContext&, ImDrawList* drawList,
+                                                             const ImVec2& origin,
+                                                             const ImVec2& size) {
+                        drawVolumePreview(fluidWorld->volume(), *component, drawList, origin,
+                                          size);
+                    });
+                } else {
+                    char stats[160];
+                    std::snprintf(stats, sizeof(stats),
+                                  "Sea state %.2f m · %zu waves · shallow %s",
+                                  fluidWorld->waves().significantWaveHeight(),
+                                  fluidWorld->waves().waves().size(),
+                                  component->shallowPhysics ? "on" : "off");
+                    card.emplace<Label>(stats, TextTone::Muted);
+                    if (component->simulateFluid2D != 0) {
+                        canvas.setOnDraw([fluidWorld, component](UIContext&,
+                                                                 ImDrawList* drawList,
+                                                                 const ImVec2& origin,
+                                                                 const ImVec2& size) {
+                            draw2DPreview(fluidWorld->fluid2D(), *component, drawList, origin,
+                                          size);
+                        });
+                    } else {
+                        canvas.setOnDraw([fluidWorld, component](UIContext&,
+                                                                 ImDrawList* drawList,
+                                                                 const ImVec2& origin,
+                                                                 const ImVec2& size) {
+                            drawSurfacePreview(*fluidWorld, *component, drawList, origin, size);
+                        });
+                    }
+                }
+            }
+        }
+
+        ctx.draw(root);
+
         bool changed = false;
-        int mode = component->mode;
-        if (ComboProperty("Level", &mode, kModeNames, IM_ARRAYSIZE(kModeNames))) {
-            const NaturalFluidComponent replacement = makeComponent(mode);
-            const Caffeine::u8 preset = component->preset;
-            *component = replacement;
-            component->preset = preset;
+        if (level != static_cast<int>(component->mode)) {
+            const Caffeine::u8 keepPreset = component->preset;
+            *component = makeComponent(level);
+            component->preset = keepPreset;
             changed = true;
         }
-
-        if (mode == static_cast<int>(NaturalFluidMode::FluidVolume)) {
-            int preset = component->preset;
-            if (ComboProperty("Fluid", &preset, kPresetNames, IM_ARRAYSIZE(kPresetNames))) {
-                applyPresetColors(*component, preset);
-                changed = true;
-            }
+        if (volumeMode && preset != static_cast<int>(component->preset)) {
+            applyPresetColors(*component, preset);
+            changed = true;
         }
-
-        if (BeginPropertyGrid("natural_fluids_props")) {
-            if (mode != static_cast<int>(NaturalFluidMode::FluidVolume)) {
-                changed |= DragFloatProperty("Size X (m)", &component->sizeX, 1.0f, 8.0f,
-                                             2048.0f, "%.0f");
-                changed |= DragFloatProperty("Size Z (m)", &component->sizeZ, 1.0f, 8.0f,
-                                             2048.0f, "%.0f");
-                changed |= DragFloatProperty("Water level", &component->waterLevel, 0.05f,
-                                             -1000.0f, 1000.0f);
-                changed |= SliderFloatProperty("Amplitude", &component->amplitudeScale, 0.0f,
-                                               3.0f, "%.2f");
-                changed |= SliderFloatProperty("Choppiness", &component->choppiness, 0.0f,
-                                               1.0f, "%.2f");
-                changed |= DragFloatProperty("Wind speed (m/s)", &component->windSpeed, 0.2f,
-                                             0.0f, 60.0f, "%.1f");
-                changed |= SliderFloatProperty("Wind direction", &component->windDirectionDeg,
-                                               0.0f, 360.0f, "%.0f deg");
-                changed |= SliderFloatProperty("Wavelength", &component->wavelengthScale, 0.1f,
-                                               4.0f, "%.2f");
-                changed |= SliderFloatProperty("Foam threshold", &component->foamThreshold,
-                                               0.0f, 1.0f, "%.2f");
-
-                bool shallow = component->shallowPhysics != 0;
-                if (CheckboxProperty("Shallow physics", &shallow)) {
-                    component->shallowPhysics = shallow ? 1 : 0;
-                    changed = true;
-                }
-                int shallowRes = static_cast<int>(component->simulationResolution);
-                if (SliderIntProperty("Physics grid", &shallowRes, 16, 192)) {
-                    component->simulationResolution = static_cast<Caffeine::u32>(shallowRes);
-                    changed = true;
-                }
-                int surfaceRes = static_cast<int>(component->surfaceResolution);
-                if (SliderIntProperty("Mesh resolution", &surfaceRes, 16, 256)) {
-                    component->surfaceResolution = static_cast<Caffeine::u32>(surfaceRes);
-                    changed = true;
-                }
-            } else {
-                changed |= DragFloatProperty("Size X (m)", &component->sizeX, 0.5f, 2.0f,
-                                             128.0f, "%.1f");
-                changed |= DragFloatProperty("Size Y (m)", &component->sizeY, 0.5f, 2.0f,
-                                             128.0f, "%.1f");
-                changed |= DragFloatProperty("Size Z (m)", &component->sizeZ, 0.5f, 2.0f,
-                                             128.0f, "%.1f");
-                int fluidRes = static_cast<int>(component->fluidResolution);
-                if (SliderIntProperty("Volume grid", &fluidRes, 12, 48)) {
-                    component->fluidResolution = static_cast<Caffeine::u32>(fluidRes);
-                    changed = true;
-                }
-                changed |= DragFloatProperty("Source rate", &component->fluidSourceRate, 0.02f,
-                                             0.0f, 4.0f, "%.2f");
-                changed |= DragFloatProperty("Source radius", &component->fluidSourceRadius,
-                                             0.1f, 0.2f, 12.0f, "%.2f");
-                changed |= DragFloatProperty("Source heat",
-                                             &component->fluidSourceTemperature, 0.05f, 0.0f,
-                                             6.0f, "%.2f");
-                changed |= DragFloatProperty("Fluid wind", &component->fluidWindSpeed, 0.1f,
-                                             0.0f, 20.0f, "%.2f");
-                changed |= SliderFloatProperty("Fluid wind dir",
-                                               &component->fluidWindDirectionDeg, 0.0f, 360.0f,
-                                               "%.0f deg");
-                changed |= DragFloatProperty("Emission", &component->fluidEmission, 0.1f, 0.0f,
-                                             20.0f, "%.2f");
-                bool renderVolume = component->renderVolume != 0;
-                if (CheckboxProperty("Render density voxels", &renderVolume)) {
-                    component->renderVolume = renderVolume ? 1 : 0;
-                    changed = true;
-                }
-            }
-
-            changed |= SliderFloatProperty("Time scale", &component->timeScale, 0.0f, 4.0f,
-                                           "%.2f");
-            bool preview = component->previewInEditor != 0;
-            if (CheckboxProperty("Animate in editor", &preview)) {
-                component->previewInEditor = preview ? 1 : 0;
-                changed = true;
-            }
-
-            float color[4] = {component->albedoR, component->albedoG, component->albedoB,
-                              component->albedoA};
-            if (ColorProperty("Surface colour", color)) {
-                component->albedoR = color[0];
-                component->albedoG = color[1];
-                component->albedoB = color[2];
-                component->albedoA = color[3];
-                changed = true;
-            }
-            changed |= SliderFloatProperty("Opacity", &component->albedoA, 0.0f, 1.0f,
-                                           "%.2f");
-            changed |= SliderFloatProperty("Roughness", &component->roughness, 0.02f, 1.0f,
-                                           "%.2f");
-
-            EndPropertyGrid();
+        if (surfaceResolution != static_cast<int>(component->surfaceResolution)) {
+            component->surfaceResolution = static_cast<Caffeine::u32>(surfaceResolution);
+            changed = true;
         }
-
+        if (simulationResolution != static_cast<int>(component->simulationResolution)) {
+            component->simulationResolution = static_cast<Caffeine::u32>(simulationResolution);
+            changed = true;
+        }
+        if (fluidResolution != static_cast<int>(component->fluidResolution)) {
+            component->fluidResolution = static_cast<Caffeine::u32>(fluidResolution);
+            changed = true;
+        }
+        if (shallow != (component->shallowPhysics != 0)) {
+            component->shallowPhysics = shallow ? 1 : 0;
+            changed = true;
+        }
+        if (preview != (component->previewInEditor != 0)) {
+            component->previewInEditor = preview ? 1 : 0;
+            changed = true;
+        }
+        if (renderVolume != (component->renderVolume != 0)) {
+            component->renderVolume = renderVolume ? 1 : 0;
+            changed = true;
+        }
+        if (simulateFluid2D != (component->simulateFluid2D != 0)) {
+            component->simulateFluid2D = simulateFluid2D ? 1 : 0;
+            changed = true;
+        }
+        if (color[0] != component->albedoR || color[1] != component->albedoG ||
+            color[2] != component->albedoB || color[3] != component->albedoA) {
+            component->albedoR = color[0];
+            component->albedoG = color[1];
+            component->albedoB = color[2];
+            component->albedoA = color[3];
+            changed = true;
+        }
+        if (std::memcmp(&before, component, sizeof(NaturalFluidComponent)) != 0) {
+            changed = true;
+        }
         if (changed) Caffeine::Editor::PluginMarkDirty(self->m_host);
-
-        SeparatorSpaced();
-        const bool volumeMode = mode == static_cast<int>(NaturalFluidMode::FluidVolume);
-        Caffeine::Fluids::FluidWorld* fluidWorld =
-            Caffeine::Scene::naturalFluidWorldForEdit(*world, entity.id());
-        if (!fluidWorld) {
-            TextMuted("Simulation starts on the next editor frame.");
-        } else {
-            if (ToolbarButton("Drop water", "Inject a volume of water")) {
-                fluidWorld->addWaterDrop(0.0f, 0.0f, 32.0f, component->shallowDepth * 3.0f);
-            }
-            if (ToolbarButton("Impulse", "Push the surface")) {
-                fluidWorld->addWaterImpulse(0.0f, 0.0f, 6.0f, 0.0f, 5.0f);
-            }
-            if (ToolbarButton("Puff", "Inject fluid at the source")) {
-                if (volumeMode) {
-                    fluidWorld->addVolumeSource(component->sizeX * 0.5f,
-                                                component->sizeY * 0.16f,
-                                                component->sizeZ * 0.5f, 1.0f,
-                                                component->fluidSourceRadius);
-                    if (component->preset !=
-                        static_cast<Caffeine::u8>(NaturalFluidPreset::Water)) {
-                        fluidWorld->volume().addTemperature(
-                            component->sizeX * 0.5f, component->sizeY * 0.16f,
-                            component->sizeZ * 0.5f, 2.0f,
-                            component->fluidSourceRadius);
-                    }
-                } else {
-                    fluidWorld->addFluidSource(component->sizeX * 0.5f,
-                                               component->sizeZ * 0.18f, 1.0f, 3.0f);
-                }
-            }
-            if (ToolbarButton("Reset", "Reset the simulation state")) {
-                Caffeine::Scene::resetNaturalFluid(*world, entity.id());
-            }
-
-            SeparatorSpaced();
-            if (volumeMode) {
-                TextMutedF("3D grid %dx%dx%d · step %.1f ms",
-                           fluidWorld->volume().resolutionX(),
-                           fluidWorld->volume().resolutionY(),
-                           fluidWorld->volume().resolutionZ(), 0.0f);
-                drawVolumePreview(fluidWorld->volume(), *component, ImVec2(0.0f, 240.0f));
-            } else {
-                const Caffeine::f32 significant =
-                    fluidWorld->waves().significantWaveHeight();
-                TextMutedF("Sea state %.2f m · %zu waves · shallow %s", significant,
-                           fluidWorld->waves().waves().size(),
-                           component->shallowPhysics ? "on" : "off");
-                if (component->simulateFluid2D != 0) {
-                    draw2DPreview(fluidWorld->fluid2D(), *component, ImVec2(0.0f, 240.0f));
-                } else {
-                    drawSurfacePreview(*fluidWorld, *component, ImVec2(0.0f, 240.0f));
-                }
-            }
-        }
 #else
         (void)userData;
 #endif

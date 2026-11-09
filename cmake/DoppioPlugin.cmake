@@ -44,6 +44,16 @@ function(doppio_add_plugin target)
         endif()
     endif()
 
+    # The composable UI kit exposes NodeCanvasView/NodeElement headers, which
+    # include <imnodes.h>. Infer the same dependency the engine build uses.
+    if(NOT IMNODES_DIR)
+        if(EXISTS "${CAFFEINE_ROOT}/build/_deps/imnodes-src")
+            set(IMNODES_DIR "${CAFFEINE_ROOT}/build/_deps/imnodes-src")
+        elseif(DEFINED imnodes_SOURCE_DIR)
+            set(IMNODES_DIR "${imnodes_SOURCE_DIR}")
+        endif()
+    endif()
+
     set(_output_name "${target}")
     if(ARG_OUTPUT_NAME)
         set(_output_name "${ARG_OUTPUT_NAME}")
@@ -57,6 +67,7 @@ function(doppio_add_plugin target)
         "${CAFFEINE_ROOT}/src/caffeine"
         "${CAFFEINE_ROOT}/vendor"
         "${IMGUI_DIR}"
+        ${IMNODES_DIR}
         ${ARG_PRIVATE_INCLUDE_DIRS})
 
     target_compile_definitions(${target} PRIVATE
