@@ -6,8 +6,8 @@ doppio_add_plugin(natural_fluids_plugin
     OUTPUT_NAME natural_fluids_plugin
     SOURCES
         src/main.cpp
-        ${CAFFEINE_ROOT}/src/fluid/WaveField.cpp
-        ${CAFFEINE_ROOT}/src/fluid/ShallowWater.cpp
-        ${CAFFEINE_ROOT}/src/fluid/EulerFluid.cpp
-        ${CAFFEINE_ROOT}/src/fluid/FluidVolume.cpp
-        ${CAFFEINE_ROOT}/src/fluid/FluidWorld.cpp)
+        ${CAFFEINE_ROOT}/src/caffeine/fluid/WaveField.cpp
+        ${CAFFEINE_ROOT}/src/caffeine/fluid/ShallowWater.cpp
+        ${CAFFEINE_ROOT}/src/caffeine/fluid/EulerFluid.cpp
+        ${CAFFEINE_ROOT}/src/caffeine/fluid/FluidVolume.cpp
+        ${CAFFEINE_ROOT}/src/caffeine/fluid/FluidWorld.cpp)

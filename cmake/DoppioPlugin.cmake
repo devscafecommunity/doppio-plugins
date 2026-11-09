@@ -54,6 +54,7 @@ function(doppio_add_plugin target)
     target_include_directories(${target} PRIVATE
         "${CAFFEINE_ROOT}/include"
         "${CAFFEINE_ROOT}/src"
+        "${CAFFEINE_ROOT}/src/caffeine"
         "${CAFFEINE_ROOT}/vendor"
         "${IMGUI_DIR}"
         ${ARG_PRIVATE_INCLUDE_DIRS})
