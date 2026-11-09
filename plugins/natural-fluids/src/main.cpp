@@ -317,7 +317,7 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         using namespace Caffeine::UIKit;
-        using namespace Caffeine::UIKit::UI;
+        using namespace Caffeine::UIKit::Elements;
 
         auto* self = static_cast<NaturalFluidsPlugin*>(userData);
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
@@ -338,7 +338,7 @@ private:
         if (!hasComponent) {
             auto& card = root.emplace<Card>("create");
             card.emplace<Label>("Natural Fluids", TextTone::Accent).setHeading(true);
-            card.emplace<UI::Paragraph>(
+            card.emplace<Elements::Paragraph>(
                 "Select an entity with Natural Fluids, or create a water surface / fluid volume.");
             auto& actions = card.emplace<Row>("create_actions");
             actions.emplace<Button>("Realistic water", ButtonVariant::Primary)
