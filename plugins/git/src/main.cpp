@@ -1,5 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 #include "GitRunner.hpp"
 
 #ifdef CF_HAS_IMGUI
@@ -86,130 +87,181 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<GitPlugin*>(userData);
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
         if (self->m_needsRefresh) {
             self->refresh();
             self->m_needsRefresh = false;
         }
 
-        PanelHeader("Git", "Version control", "git");
-        Paragraph(
-            "Optional Git panel — not part of Doppio core. Requires git in PATH and an open "
-            "project.");
+        UIContext ui;
+        Column root("git_root");
 
-        if (ToolbarButton("Refresh", "Reload git status")) self->refresh();
+        auto& header = root.emplace<Card>("git_header");
+        header.emplace<Label>("Git", TextTone::Accent).setHeading(true);
+        header.emplace<Label>("Version control", TextTone::Muted);
+        header.emplace<Elements::Paragraph>(
+            "Optional Git panel - not part of Doppio core. Requires git in PATH and "
+            "an open project.");
+        auto& refreshRow = header.emplace<Row>("git_refresh_row");
+        auto& refresh = refreshRow.emplace<Button>("Refresh");
+        refresh.setGrow(true);
+        refresh.setTooltip("Reload git status");
+        refresh.setOnClick([self] { self->refresh(); });
 
         if (self->m_repoRoot.empty()) {
-            EmptyState("No repository", "Open a project scene to detect the repository root.",
-                       "git");
+            root.emplace<Elements::EmptyState>(
+                "No repository", "Open a project scene to detect the repository root.",
+                "git");
+            ui.draw(root);
             return;
         }
 
         if (!Caffeine::Plugins::Git::isGitRepository(self->m_repoRoot)) {
-            const std::string message = "Not a git repository: " + self->m_repoRoot.string();
-            TextWarning(message.c_str());
-            if (ToolbarButton("git init", "Initialise a repository here")) {
-                self->runGitCommand({"init"});
-            }
+            auto& warning = root.emplace<Card>("git_warning");
+            warning.emplace<Label>("Not a git repository:", TextTone::Warning);
+            warning.emplace<Label>(self->m_repoRoot.string(), TextTone::Muted).setWrap(true);
+            auto& init = warning.emplace<Button>("git init");
+            init.setTooltip("Initialise a repository here");
+            init.setOnClick([self] { self->runGitCommand({"init"}); });
+            ui.draw(root);
             return;
         }
 
-        TextMutedF("Repo: %s", self->m_repoRoot.string().c_str());
-        TextMutedF("Branch: %s", self->m_branch.empty() ? "(detached)" : self->m_branch.c_str());
+        auto& info = root.emplace<Card>("git_info");
+        info.emplace<Label>("Repo: " + self->m_repoRoot.string(), TextTone::Muted)
+            .setWrap(true);
+        info.emplace<Label>("Branch: " + (self->m_branch.empty() ? std::string("(detached)")
+                                                                : self->m_branch),
+                            TextTone::Normal);
 
-        if (Section("Changes")) {
-            if (ToolbarButton("Stage all")) self->runGitCommand({"add", "-A"});
-            SameLine();
-            if (ToolbarButton("Unstage all")) self->runGitCommand({"reset"});
+        auto& changes = root.emplace<Elements::Section>("Changes");
+        auto& changesRow = changes.emplace<Row>("git_changes_actions");
+        changesRow.emplace<Button>("Stage all").setOnClick([self] {
+            self->runGitCommand({"add", "-A"});
+        });
+        changesRow.emplace<Button>("Unstage all").setOnClick([self] {
+            self->runGitCommand({"reset"});
+        });
 
-            BeginList("git_changes", ImVec2(0, 160), true);
-            for (std::size_t i = 0; i < self->m_files.size(); ++i) {
-                const auto& file = self->m_files[i];
-                PushId(static_cast<int>(i));
-                TextF("%c%c %s", file.index, file.workTree, file.path.c_str());
-                SameLine();
-                if (MiniButton("Stage")) {
-                    self->runGitCommand({"add", file.path});
-                }
-                SameLine();
-                if (MiniButton("Diff")) {
-                    self->m_lastOutput =
-                        Caffeine::Plugins::Git::runGit(self->m_repoRoot, {"diff", file.path}).output;
-                }
-                PopId();
-            }
-            EndList();
+        auto& changeList = changes.emplace<ScrollArea>("git_changes");
+        changeList.setHeight(160.0f);
+        if (self->m_files.empty()) {
+            changeList.emplace<Label>("Working tree clean.", TextTone::Muted);
+        }
+        for (std::size_t i = 0; i < self->m_files.size(); ++i) {
+            const auto& file = self->m_files[i];
+            auto& row = changeList.emplace<Row>("git_file_" + std::to_string(i));
+            char tag[4] = {file.index, file.workTree, ' ', '\0'};
+            auto& label = row.emplace<Label>(std::string(tag) + file.path, TextTone::Normal);
+            label.setGrow(true);
+            label.setTooltip(file.path);
+            auto& stage = row.emplace<Button>("Stage");
+            stage.setWidth(62.0f);
+            stage.setOnClick([self, path = file.path] {
+                self->runGitCommand({"add", path});
+            });
+            auto& diff = row.emplace<Button>("Diff");
+            diff.setWidth(52.0f);
+            diff.setOnClick([self, path = file.path] {
+                self->m_lastOutput = Caffeine::Plugins::Git::runGit(
+                                         self->m_repoRoot, {"diff", path})
+                                         .output;
+            });
         }
 
-        if (Section("Commit")) {
-            InputTextMultiline("Message", self->m_commitMessage, sizeof(self->m_commitMessage),
-                                      ImVec2(-1, 60));
-            if (PrimaryButton("Commit") && self->m_commitMessage[0] != '\0') {
-                self->runGitCommand({"commit", "-m", self->m_commitMessage});
-                self->m_commitMessage[0] = '\0';
-            }
-        }
+        auto& commit = root.emplace<Elements::Section>("Commit");
+        auto& message = commit.emplace<MultilineText>(self->m_commitMessage,
+                                                       sizeof(self->m_commitMessage));
+        message.setHeight(60.0f);
+        auto& commitRow = commit.emplace<Row>("git_commit_row");
+        auto& commitButton = commitRow.emplace<Button>("Commit", ButtonVariant::Primary);
+        commitButton.setGrow(true);
+        commitButton.setOnClick([self] {
+            if (self->m_commitMessage[0] == '\0') return;
+            self->runGitCommand({"commit", "-m", self->m_commitMessage});
+            self->m_commitMessage[0] = '\0';
+        });
 
-        if (Section("Branches", false)) {
-            int branchIndex = 0;
+        auto& branches = root.emplace<Elements::Section>("Branches", false);
+        if (!self->m_branches.empty()) {
+            self->m_branchIndex = 0;
             for (std::size_t i = 0; i < self->m_branches.size(); ++i) {
-                if (self->m_branches[i] == self->m_branch) branchIndex = static_cast<int>(i);
-            }
-            if (!self->m_branches.empty()) {
-                std::vector<const char*> labels;
-                labels.reserve(self->m_branches.size());
-                for (const auto& b : self->m_branches) labels.push_back(b.c_str());
-                if (Combo("Checkout", &branchIndex, labels.data(),
-                                 static_cast<int>(labels.size()))) {
-                    self->runGitCommand({"checkout", self->m_branches[branchIndex]});
+                if (self->m_branches[i] == self->m_branch) {
+                    self->m_branchIndex = static_cast<int>(i);
                 }
             }
-            InputTextLine("New branch", self->m_newBranch, sizeof(self->m_newBranch));
-            SameLine();
-            if (ToolbarButton("Create") && self->m_newBranch[0] != '\0') {
-                self->runGitCommand({"checkout", "-b", self->m_newBranch});
-                self->m_newBranch[0] = '\0';
-            }
+            auto& branchGrid = branches.emplace<PropertyGrid>("git_branches");
+            branchGrid
+                .typedRow<ChoiceProperty>("Checkout", self->m_branchIndex, self->m_branches)
+                .setOnChange([self](int index) {
+                    if (index >= 0 && index < static_cast<int>(self->m_branches.size())) {
+                        self->runGitCommand({"checkout", self->m_branches[index]});
+                    }
+                });
+        }
+        auto& newBranchRow = branches.emplace<Row>("git_new_branch_row");
+        auto& newBranch = newBranchRow.emplace<TextInput>(self->m_newBranch,
+                                                           sizeof(self->m_newBranch));
+        newBranch.setHint("New branch");
+        newBranch.setGrow(true);
+        auto& createBranch = newBranchRow.emplace<Button>("Create");
+        createBranch.setWidth(78.0f);
+        createBranch.setOnClick([self] {
+            if (self->m_newBranch[0] == '\0') return;
+            self->runGitCommand({"checkout", "-b", self->m_newBranch});
+            self->m_newBranch[0] = '\0';
+        });
+
+        auto& remotes = root.emplace<Elements::Section>("Remotes & sync", false);
+        if (self->m_remotes.empty()) {
+            remotes.emplace<Label>("No remotes configured.", TextTone::Muted);
+        }
+        for (const auto& remote : self->m_remotes) {
+            remotes.emplace<Label>("- " + remote, TextTone::Muted);
+        }
+        auto& remoteRow = remotes.emplace<Row>("git_remote_actions");
+        remoteRow.emplace<Button>("Fetch").setOnClick([self] {
+            self->runGitCommand({"fetch", "--all", "--prune"});
+        });
+        remoteRow.emplace<Button>("Pull").setOnClick([self] {
+            self->runGitCommand({"pull"});
+        });
+        remoteRow.emplace<Button>("Push").setOnClick([self] {
+            self->runGitCommand({"push"});
+        });
+
+        auto& history = root.emplace<Elements::Section>("History", false);
+        auto& logList = history.emplace<ListBox>("git_log");
+        logList.setHeight(120.0f);
+        for (const auto& entry : self->m_log) {
+            auto& item = logList.emplace<ListItem>(entry);
+            item.setId("git_log_" + entry);
+            item.setOnClick([self, entry] { self->m_lastOutput = entry; });
         }
 
-        if (Section("Remotes & sync", false)) {
-            for (const auto& remote : self->m_remotes) {
-                Bullet(remote.c_str());
-            }
-            if (ToolbarButton("Fetch")) self->runGitCommand({"fetch", "--all", "--prune"});
-            SameLine();
-            if (ToolbarButton("Pull")) self->runGitCommand({"pull"});
-            SameLine();
-            if (ToolbarButton("Push")) self->runGitCommand({"push"});
-        }
-
-        if (Section("History", false)) {
-            BeginList("git_log", ImVec2(0, 120), true);
-            for (const auto& entry : self->m_log) {
-                if (SelectableRow(entry.c_str())) {
-                    self->m_lastOutput = entry;
-                }
-            }
-            EndList();
-        }
-
-        if (Section("Stash", false)) {
-            if (ToolbarButton("Stash push")) self->runGitCommand({"stash", "push", "-u"});
-            SameLine();
-            if (ToolbarButton("Stash pop")) self->runGitCommand({"stash", "pop"});
-            SameLine();
-            if (ToolbarButton("Stash list")) {
-                self->m_lastOutput =
-                    Caffeine::Plugins::Git::runGit(self->m_repoRoot, {"stash", "list"}).output;
-            }
-        }
+        auto& stash = root.emplace<Elements::Section>("Stash", false);
+        auto& stashRow = stash.emplace<Row>("git_stash_actions");
+        stashRow.emplace<Button>("Stash push").setOnClick([self] {
+            self->runGitCommand({"stash", "push", "-u"});
+        });
+        stashRow.emplace<Button>("Stash pop").setOnClick([self] {
+            self->runGitCommand({"stash", "pop"});
+        });
+        stashRow.emplace<Button>("Stash list").setOnClick([self] {
+            self->m_lastOutput =
+                Caffeine::Plugins::Git::runGit(self->m_repoRoot, {"stash", "list"}).output;
+        });
 
         if (!self->m_lastOutput.empty()) {
-            SeparatorSpaced();
-            SectionLabel("Output");
-            BeginList("git_output", ImVec2(0, 120), true);
-            TextF("%s", self->m_lastOutput.c_str());
-            EndList();
+            auto& output = root.emplace<Card>("git_output_card");
+            output.emplace<Label>("Output", TextTone::Accent).setHeading(true);
+            auto& scroll = output.emplace<ScrollArea>("git_output");
+            scroll.setHeight(120.0f);
+            scroll.emplace<Label>(self->m_lastOutput, TextTone::Muted).setWrap(true);
         }
+
+        ui.draw(root);
 #else
         (void)userData;
 #endif
@@ -225,6 +277,7 @@ private:
     std::string m_lastOutput;
     char m_commitMessage[512] = {};
     char m_newBranch[128] = {};
+    int m_branchIndex = 0;
     bool m_needsRefresh = true;
 };
 

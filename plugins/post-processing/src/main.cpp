@@ -1,5 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 #include "caffeine/postprocess/PostProcessEditorUI.hpp"
 #include "caffeine/postprocess/PostProcessPresets.hpp"
 #include "ecs/PostProcessComponents.hpp"
@@ -55,50 +56,74 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<PostProcessingPlugin*>(userData);
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("post_processing_root");
+
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
         if (!world) {
-            EmptyState("No active scene", "Open or create a scene with a camera to author effects.",
-                       "effects");
+            root.emplace<Elements::EmptyState>(
+                "No active scene",
+                "Open or create a scene with a camera to author effects.", "effects");
+            ui.draw(root);
             return;
         }
         const Caffeine::ECS::Entity e =
             Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
         if (!e.isValid()) {
-            EmptyState("Select a camera entity",
-                       "Combine effect modules below — Cinematic / Horror / Arcade are optional "
-                       "benchmark looks, not game types.",
-                       "effects");
+            root.emplace<Elements::EmptyState>(
+                "Select a camera entity",
+                "Combine effect modules below - Cinematic / Horror / Arcade are optional "
+                "benchmark looks, not game types.",
+                "effects");
+            ui.draw(root);
             return;
         }
 
-        PanelHeader("Post Processing", "GPU effect stack", "effects");
-        TextMutedF("Target: entity %u", e.id());
+        auto& header = root.emplace<Card>("pp_header");
+        header.emplace<Label>("Post Processing", TextTone::Accent).setHeading(true);
+        header.emplace<Label>("GPU effect stack", TextTone::Muted);
+        header.emplace<Label>("Target: entity " + std::to_string(e.id()), TextTone::Muted);
 
         if (!world->has<Caffeine::ECS::PostProcessComponent>(e)) {
-            if (PrimaryButton("Add Post Process Stack")) {
+            auto& add = root.emplace<Button>("Add Post Process Stack",
+                                             ButtonVariant::Primary);
+            add.setOnClick([self, world, e] {
                 world->add<Caffeine::ECS::PostProcessComponent>(e);
                 Caffeine::Editor::PluginMarkDirty(self->m_host);
-            }
+            });
+            ui.draw(root);
             return;
         }
 
         auto* fx = world->get<Caffeine::ECS::PostProcessComponent>(e);
-        if (!fx) return;
+        if (!fx) {
+            ui.draw(root);
+            return;
+        }
 
-        Paragraph(
-            "The same stack the viewport and gameplay preview run on the GPU. Enable each module "
-            "on its own; cinematic, horror and arcade are optional looks, not game types.");
+        auto& intro = root.emplace<Card>("pp_intro");
+        intro.emplace<Elements::Paragraph>(
+            "The same stack the viewport and gameplay preview run on the GPU. Enable each "
+            "module on its own; cinematic, horror and arcade are optional looks, not game "
+            "types.");
 
-        if (Section("Benchmark looks (optional)")) {
+        auto& benchmark = root.emplace<Elements::Section>("Benchmark looks (optional)");
+        benchmark.emplace<CustomElement>("pp_benchmarks", [self, fx] {
             if (Caffeine::PostProcess::EditorUI::drawBenchmarkPresets(*fx)) {
                 Caffeine::Editor::PluginMarkDirty(self->m_host);
             }
-        }
+        });
 
-        SeparatorSpaced();
-        if (Caffeine::PostProcess::EditorUI::drawEffectStack(*fx)) {
-            Caffeine::Editor::PluginMarkDirty(self->m_host);
-        }
+        root.emplace<Elements::Separator>();
+        root.emplace<CustomElement>("pp_stack", [self, fx] {
+            if (Caffeine::PostProcess::EditorUI::drawEffectStack(*fx)) {
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
+            }
+        });
+
+        ui.draw(root);
 #else
         (void)userData;
 #endif
@@ -130,10 +155,21 @@ private:
 
     static void drawComponent(void* componentData, void* userData) {
 #ifdef CF_HAS_IMGUI
-        (void)userData;
         auto* fx = static_cast<Caffeine::ECS::PostProcessComponent*>(componentData);
+        auto* self = static_cast<PostProcessingPlugin*>(userData);
         if (!fx) return;
-        Caffeine::PostProcess::EditorUI::drawEffectStack(*fx);
+
+        using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("pp_component_root");
+        root.emplace<CustomElement>("pp_component_stack", [self, fx] {
+            if (Caffeine::PostProcess::EditorUI::drawEffectStack(*fx)) {
+                Caffeine::Editor::PluginMarkDirty(self->m_host);
+            }
+        });
+        ui.draw(root);
 #else
         (void)componentData;
         (void)userData;

@@ -1,5 +1,6 @@
 #include "caffeine/navigation/NavigationApi.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -75,124 +76,157 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<AiDevelopmentPlugin*>(userData);
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("ai_development_root");
+
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
         if (!world) {
-            EmptyState("No active scene", "Open or create a scene to author NPC behaviour.",
-                       "account");
+            root.emplace<Elements::EmptyState>(
+                "No active scene", "Open or create a scene to author NPC behaviour.",
+                "account");
+            ui.draw(root);
             return;
         }
         const auto markDirty = [self] { Caffeine::Editor::PluginMarkDirty(self->m_host); };
-        PanelHeader("AI Development", "NPC navigation and behaviour", "account");
-        Paragraph(
-            "Program any NPC: a villager, a guide, a creature, or an opponent. The grid pathfinder "
-            "lives in the engine; this panel only authors behaviour.");
+
+        auto& header = root.emplace<Card>("ai_header");
+        header.emplace<Label>("AI Development", TextTone::Accent).setHeading(true);
+        header.emplace<Label>("NPC navigation and behaviour", TextTone::Muted);
+        header.emplace<Elements::Paragraph>(
+            "Program any NPC: a villager, a guide, a creature, or an opponent. The grid "
+            "pathfinder lives in the engine; this panel only authors behaviour.");
 
         const Caffeine::ECS::Entity entity =
             Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
         if (!entity.isValid()) {
-            EmptyState("No entity selected", "Select an entity to add a nav volume or an agent.",
-                       "hierarchy");
+            root.emplace<Elements::EmptyState>(
+                "No entity selected",
+                "Select an entity to add a nav volume or an agent.", "hierarchy");
+            ui.draw(root);
             return;
         }
-        TextMutedF("Target: entity %u", entity.id());
+        header.emplace<Label>("Target: entity " + std::to_string(entity.id()),
+                              TextTone::Muted);
 
         if (!world->has<Caffeine::Navigation::NavVolume>(entity)) {
-            if (PrimaryButton("Add Nav Volume")) {
+            auto& addVolume = root.emplace<Button>("Add Nav Volume", ButtonVariant::Primary);
+            addVolume.setOnClick([world, entity, markDirty] {
                 Caffeine::Navigation::NavVolume volume;
                 volume.resize(32, 32);
                 world->add<Caffeine::Navigation::NavVolume>(entity, volume);
                 markDirty();
-            }
+            });
         } else if (auto* volume = world->get<Caffeine::Navigation::NavVolume>(entity)) {
-            if (Section("Nav volume")) {
-                if (BeginPropertyGrid("ai_nav_volume")) {
-                    int size[2] = {volume->width, volume->height};
-                    if (DragInt2Property("Cells", size, 1.0f, 2, 256)) {
-                        volume->resize(size[0], size[1]);
-                        markDirty();
-                    }
-                    if (DragFloatProperty("Cell size", &volume->cellSize, 0.05f, 0.1f, 100.0f)) {
-                        markDirty();
-                    }
-                    if (PropertyRow("Origin", [&] {
-                            return DragVec3("origin", &volume->origin.x, 0.1f);
-                        })) {
-                        markDirty();
-                    }
-                    EndPropertyGrid();
-                }
-            }
+            auto& navSection = root.emplace<Elements::Section>("Nav volume");
+            self->m_navWidth = volume->width;
+            self->m_navHeight = volume->height;
+            auto& grid = navSection.emplace<PropertyGrid>("ai_nav_volume");
+            grid.typedRow<IntProperty>("Width", self->m_navWidth, 2, 256, 1.0f, "%d")
+                .setOnChange([self, volume, markDirty](int value) {
+                    volume->resize(value, self->m_navHeight);
+                    markDirty();
+                });
+            grid.typedRow<IntProperty>("Height", self->m_navHeight, 2, 256, 1.0f, "%d")
+                .setOnChange([self, volume, markDirty](int value) {
+                    volume->resize(self->m_navWidth, value);
+                    markDirty();
+                });
+            grid.typedRow<FloatProperty>("Cell size", volume->cellSize, 0.1f, 100.0f, 0.05f,
+                                         "%.2f")
+                .setOnChange([markDirty](float) { markDirty(); });
+            grid.typedRow<Vec3Property>("Origin", volume->origin, 0.1f)
+                .setOnChange([markDirty] { markDirty(); });
         }
 
         if (!world->has<Caffeine::Navigation::NavAgent>(entity)) {
-            SeparatorSpaced();
-            if (PrimaryButton("Add Nav Agent")) {
+            auto& addAgent = root.emplace<Button>("Add Nav Agent", ButtonVariant::Primary);
+            addAgent.setOnClick([world, entity, markDirty] {
                 world->add<Caffeine::Navigation::NavAgent>(entity);
                 markDirty();
-            }
+            });
         } else if (auto* agent = world->get<Caffeine::Navigation::NavAgent>(entity)) {
-            if (Section("Agent")) {
-                if (BeginPropertyGrid("ai_agent")) {
-                    int mode = static_cast<int>(agent->mode);
-                    const char* modes[] = {"Idle", "Patrol", "Follow", "Scripted"};
-                    if (ComboProperty("Behaviour", &mode, modes, 4)) {
-                        agent->mode = static_cast<Caffeine::Navigation::NavMode>(mode);
-                        agent->planDirty = true;
-                        markDirty();
-                    }
-                    if (DragFloatProperty("Speed", &agent->speed, 0.05f, 0.0f, 100.0f)) {
-                        markDirty();
-                    }
-                    if (PropertyRow("Destination", [&] {
-                            return DragVec3("destination", &agent->destination.x, 0.1f);
-                        })) {
-                        agent->hasDestination = true;
-                        agent->planDirty = true;
-                        markDirty();
-                    }
-                    EndPropertyGrid();
-                }
-                if (ToolbarButton("Add patrol point from destination")) {
-                    Caffeine::Navigation::addPatrolPoint(*world, entity, agent->destination);
+            auto& agentSection = root.emplace<Elements::Section>("Agent");
+            self->m_agentMode = static_cast<int>(agent->mode);
+            auto& grid = agentSection.emplace<PropertyGrid>("ai_agent");
+            grid.typedRow<ChoiceProperty>(
+                "Behaviour", self->m_agentMode,
+                std::vector<std::string>{"Idle", "Patrol", "Follow", "Scripted"})
+                .setOnChange([agent, markDirty](int value) {
+                    agent->mode = static_cast<Caffeine::Navigation::NavMode>(value);
+                    agent->planDirty = true;
                     markDirty();
-                }
-                TextMutedF("Patrol points: %u", agent->patrolCount);
-                if (ToolbarButton("Clear patrol")) {
-                    agent->patrolCount = 0;
-                    agent->patrolIndex = 0;
+                });
+            grid.typedRow<FloatProperty>("Speed", agent->speed, 0.0f, 100.0f, 0.05f, "%.2f")
+                .setOnChange([markDirty](float) { markDirty(); });
+            grid.typedRow<Vec3Property>("Destination", agent->destination, 0.1f)
+                .setOnChange([agent, markDirty] {
+                    agent->hasDestination = true;
+                    agent->planDirty = true;
                     markDirty();
-                }
-            }
+                });
 
-            if (Section("Behaviour scripts", false)) {
-                const std::filesystem::path projectRoot =
-                    Caffeine::Editor::PluginProjectRoot(self->m_host);
-                const std::filesystem::path root = projectRoot.empty()
-                                                       ? std::filesystem::path("scripts/ai")
-                                                       : projectRoot / "scripts" / "ai";
-                auto save = [&](const char* file, const char* source) {
-                    const std::filesystem::path path = root / file;
-                    if (!writeTemplate(path, source)) return;
-                    Caffeine::Navigation::setBehaviorScript(*world, entity, path.generic_string());
-                    Caffeine::Editor::PluginMarkAssetBrowserDirty(self->m_host);
-                    markDirty();
-                };
-                if (ToolbarButton("Write idle.lua")) save("idle.lua", kIdleScript);
-                SameLine();
-                if (ToolbarButton("Write patrol.lua")) save("patrol.lua", kPatrolScript);
-                SameLine();
-                if (ToolbarButton("Write follow.lua")) save("follow.lua", kFollowScript);
-                if (agent->behaviorScript[0] != '\0') {
-                    TextMutedF("Script: %s", agent->behaviorScript);
-                }
+            auto& patrolRow = agentSection.emplace<Row>("ai_patrol_actions");
+            auto& addPatrol = patrolRow.emplace<Button>("Add patrol point from destination");
+            addPatrol.setGrow(true);
+            addPatrol.setOnClick([world, entity, agent, markDirty] {
+                Caffeine::Navigation::addPatrolPoint(*world, entity, agent->destination);
+                markDirty();
+            });
+            auto& clearPatrol = patrolRow.emplace<Button>("Clear");
+            clearPatrol.setWidth(64.0f);
+            clearPatrol.setOnClick([agent, markDirty] {
+                agent->patrolCount = 0;
+                agent->patrolIndex = 0;
+                markDirty();
+            });
+            agentSection.emplace<Label>(
+                "Patrol points: " + std::to_string(agent->patrolCount), TextTone::Muted);
+
+            auto& scripts = agentSection.emplace<Elements::Section>("Behaviour scripts",
+                                                                     false);
+            const std::filesystem::path projectRoot =
+                Caffeine::Editor::PluginProjectRoot(self->m_host);
+            const std::filesystem::path scriptsRoot =
+                projectRoot.empty() ? std::filesystem::path("scripts/ai")
+                                    : projectRoot / "scripts" / "ai";
+            auto save = [world, entity, self, scriptsRoot, markDirty](const char* file,
+                                                                      const char* source) {
+                const std::filesystem::path path = scriptsRoot / file;
+                if (!writeTemplate(path, source)) return;
+                Caffeine::Navigation::setBehaviorScript(*world, entity,
+                                                        path.generic_string());
+                Caffeine::Editor::PluginMarkAssetBrowserDirty(self->m_host);
+                markDirty();
+            };
+            auto& scriptRow = scripts.emplace<Row>("ai_script_actions");
+            scriptRow.emplace<Button>("Write idle.lua").setOnClick([save] {
+                save("idle.lua", kIdleScript);
+            });
+            scriptRow.emplace<Button>("Write patrol.lua").setOnClick([save] {
+                save("patrol.lua", kPatrolScript);
+            });
+            scriptRow.emplace<Button>("Write follow.lua").setOnClick([save] {
+                save("follow.lua", kFollowScript);
+            });
+            if (agent->behaviorScript[0] != '\0') {
+                scripts.emplace<Label>("Script: " + std::string(agent->behaviorScript),
+                                       TextTone::Muted)
+                    .setWrap(true);
             }
         }
+
+        ui.draw(root);
 #else
         (void)userData;
 #endif
     }
 
     const Caffeine::Editor::PluginHostApi* m_host = nullptr;
+    int m_navWidth = 32;
+    int m_navHeight = 32;
+    int m_agentMode = 0;
 };
 
 AiDevelopmentPlugin* g_plugin = nullptr;

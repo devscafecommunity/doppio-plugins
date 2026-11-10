@@ -1,5 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 #include "ecs/TerrainComponents.hpp"
 #include "TerrainBridge.hpp"
 
@@ -46,10 +47,18 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<TerrainGeneratorPlugin*>(userData);
+        using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("terrain_generator_root");
+
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
         if (!world) {
-            Caffeine::UIKit::EmptyState("No active scene", "Open or create a scene to generate terrain.",
-                                        "terrain");
+            root.emplace<Elements::EmptyState>(
+                "No active scene", "Open or create a scene to generate terrain.",
+                "terrain");
+            ui.draw(root);
             return;
         }
 
@@ -57,33 +66,44 @@ private:
             Caffeine::Editor::PluginSelectedEntity(self->m_host, world);
         if (!entity.isValid() ||
             !world->has<Caffeine::ECS::TerrainComponent>(entity)) {
-            Caffeine::UIKit::EmptyState("No terrain entity selected",
-                                        "Select a Terrain entity, then choose a preset and click Generate.",
-                                        "terrain");
+            root.emplace<Elements::EmptyState>(
+                "No terrain entity selected",
+                "Select a Terrain entity, then choose a preset and click Generate.",
+                "terrain");
+            ui.draw(root);
             return;
         }
 
         auto* terrain = world->get<Caffeine::ECS::TerrainComponent>(entity);
         if (!terrain) return;
 
-        using namespace Caffeine::UIKit;
-        PanelHeader("Terrain Generator", "Domain warping + geomorphological PDE", "terrain");
-        TextMutedF("Entity %u · %ux%u heightmap", entity.id(),
-                   terrain->resolutionX, terrain->resolutionZ);
+        static const char* kPresets[] = {"default", "arctic", "mesa", "volcanic",
+                                         "glacial", "blend"};
+        char info[128];
+        std::snprintf(info, sizeof(info), "Entity %u - %ux%u heightmap", entity.id(),
+                      terrain->resolutionX, terrain->resolutionZ);
 
-        static const char* kPresets[] = {"default", "alpine", "mesa", "volcanic", "glacial", "blend"};
-        if (BeginPropertyGrid("terrain_generator_props")) {
-            ComboProperty("Preset", &self->m_presetIndex, kPresets, IM_ARRAYSIZE(kPresets));
-            DragFloatProperty("World size (m)", &self->m_worldSize, 4.0f, 32.0f, 4096.0f, "%.0f");
-            DragIntProperty("Grid size", &self->m_gridSize, 8.0f, 64, 1024);
-            DragIntProperty("Seed", &self->m_seed, 1.0f, 0, 999999);
-            EndPropertyGrid();
-        }
+        auto& card = root.emplace<Card>("terrain_generator_card");
+        card.emplace<Label>("Terrain Generator", TextTone::Accent).setHeading(true);
+        card.emplace<Label>("Domain warping + geomorphological PDE", TextTone::Muted);
+        card.emplace<Label>(info, TextTone::Muted);
 
-        SeparatorSpaced();
+        auto& grid = card.emplace<PropertyGrid>("terrain_generator_props");
+        grid.typedRow<ChoiceProperty>(
+            "Preset", self->m_presetIndex,
+            std::vector<std::string>{std::begin(kPresets), std::end(kPresets)});
+        grid.typedRow<FloatProperty>("World size (m)", self->m_worldSize, 4.0f, 4096.0f,
+                                     1.0f, "%.0f");
+        grid.typedRow<IntProperty>("Grid size", self->m_gridSize, 64, 1024, 1.0f, "%d");
+        grid.typedRow<IntProperty>("Seed", self->m_seed, 0, 999999, 1.0f, "%d");
+
+        card.emplace<Elements::Separator>();
         if (self->m_busy) {
-            TextMuted("Generating… (Node.js)");
-        } else if (PrimaryButton("Generate Terrain")) {
+            card.emplace<Label>("Generating... (Node.js)", TextTone::Warning);
+        }
+        auto& generate = card.emplace<Button>("Generate Terrain", ButtonVariant::Primary);
+        generate.setEnabled(!self->m_busy);
+        generate.setOnClick([self, world, entity] {
             self->m_busy = true;
             std::string error;
             const bool ok = Caffeine::Editor::TerrainBridge::generateUltraRealistic(
@@ -94,20 +114,22 @@ private:
             if (ok) {
                 Caffeine::Editor::PluginMarkDirty(self->m_host);
                 if (self->m_host->logInfo) {
-                    self->m_host->logInfo(self->m_host->editorContext, "Terrain generated.");
+                    self->m_host->logInfo(self->m_host->editorContext,
+                                          "Terrain generated.");
                 }
             } else if (self->m_host->logError) {
                 self->m_host->logError(self->m_host->editorContext, error.c_str());
             }
-        }
+        });
 
-        SeparatorSpaced();
-        SectionLabel("Import");
-        if (BeginPropertyGrid("terrain_import")) {
-            InputTextProperty("Heightmap path", self->m_importPath, sizeof(self->m_importPath));
-            EndPropertyGrid();
-        }
-        if (ToolbarButton("Import .txt heightmap")) {
+        auto& importSection = root.emplace<Elements::Section>("Import");
+        auto& importGrid = importSection.emplace<PropertyGrid>("terrain_import");
+        importGrid.typedRow<BufferProperty>("Heightmap path", self->m_importPath,
+                                             sizeof(self->m_importPath));
+        auto& importRow = importSection.emplace<Row>("terrain_import_row");
+        auto& importButton = importRow.emplace<Button>("Import .txt heightmap");
+        importButton.setGrow(true);
+        importButton.setOnClick([self, world, entity, terrain] {
             std::string error;
             if (Caffeine::Editor::TerrainBridge::importHeightmap(
                     *world, entity, self->m_importPath, terrain->worldSizeX,
@@ -116,10 +138,15 @@ private:
             } else if (self->m_host->logError) {
                 self->m_host->logError(self->m_host->editorContext, error.c_str());
             }
-        }
+        });
 
-        TextMuted(
-            "Algorithm: assets/general-ultra-realistic-terrain-algorithm (npm install on first run).");
+        card.emplace<Label>(
+            "Algorithm: assets/general-ultra-realistic-terrain-algorithm "
+            "(npm install on first run).",
+            TextTone::Muted)
+            .setWrap(true);
+
+        ui.draw(root);
 #else
         (void)userData;
 #endif

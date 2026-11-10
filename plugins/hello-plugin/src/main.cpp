@@ -1,5 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 
 #ifdef CF_HAS_IMGUI
 #include <imgui.h>
@@ -43,21 +44,36 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<HelloPlugin*>(userData);
         using namespace Caffeine::UIKit;
-        PanelHeader("Hello Plugin", "Plugin SDK sample", "hello");
-        Paragraph("Ola do plugin Caffeine!");
-        Badge(self->GetVersion(), tokens().accent);
-        TextMuted("The panel is rendered with the public Caffeine UI kit.");
-        SeparatorSpaced();
-        if (PrimaryButton("Log to console")) {
-            if (self->m_host && self->m_host->logInfo) {
-                self->m_host->logInfo(self->m_host->editorContext, "Hello Plugin button clicked");
-            }
-        }
-        if (ToolbarButton("Secondary action", "Uses the shared widget vocabulary")) {
-            if (self->m_host && self->m_host->logInfo) {
-                self->m_host->logInfo(self->m_host->editorContext, "Hello Plugin secondary action");
-            }
-        }
+        using namespace Caffeine::UIKit::Elements;
+
+        Column root("hello_plugin_root");
+        auto& card = root.emplace<Card>("hello_plugin_card");
+        card.emplace<Label>("Hello Plugin", TextTone::Accent).setHeading(true);
+        card.emplace<Label>("Plugin SDK sample", TextTone::Muted);
+        card.emplace<Elements::Badge>(self->GetVersion());
+        card.emplace<Elements::Paragraph>(
+            "The panel is rendered with the public Caffeine UI kit.");
+        card.emplace<Elements::Separator>();
+
+        auto& actions = card.emplace<Row>("hello_plugin_actions");
+        actions.emplace<Button>("Log to console", ButtonVariant::Primary)
+            .setOnClick([self] {
+                if (self->m_host && self->m_host->logInfo) {
+                    self->m_host->logInfo(self->m_host->editorContext,
+                                          "Hello Plugin button clicked");
+                }
+            });
+        auto& secondary = actions.emplace<Button>("Secondary action");
+        secondary.setTooltip("Uses the shared widget vocabulary");
+        secondary.setOnClick([self] {
+                if (self->m_host && self->m_host->logInfo) {
+                    self->m_host->logInfo(self->m_host->editorContext,
+                                          "Hello Plugin secondary action");
+                }
+            });
+
+        UIContext ctx;
+        ctx.draw(root);
 #else
         (void)userData;
 #endif

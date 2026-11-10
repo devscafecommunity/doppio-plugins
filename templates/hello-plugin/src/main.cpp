@@ -1,4 +1,5 @@
 #include "caffeine/plugin/PluginAPI.hpp"
+#include "caffeine/ui/UI.hpp"
 
 #ifdef CF_HAS_IMGUI
 #include <imgui.h>
@@ -36,14 +37,27 @@ private:
     static void renderPanel(void* userData) {
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<HelloPlugin*>(userData);
-        ImGui::TextUnformatted("Hello from doppio-plugins!");
-        ImGui::TextDisabled("Version %s", self->GetVersion());
-        if (ImGui::Button("Log to console")) {
-            if (self->m_host && self->m_host->logInfo) {
-                self->m_host->logInfo(self->m_host->editorContext,
-                                      "Hello Plugin button clicked");
-            }
-        }
+        using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        Column root("hello_template_root");
+        auto& card = root.emplace<Card>("hello_template_card");
+        card.emplace<Label>("Hello from doppio-plugins!", TextTone::Accent).setHeading(true);
+        card.emplace<Label>("Version " + std::string(self->GetVersion()), TextTone::Muted);
+        card.emplace<Elements::Paragraph>(
+            "This template uses the composable element kit. Replace the Card "
+            "children with your own elements.");
+        card.emplace<Separator>();
+        card.emplace<Button>("Log to console", ButtonVariant::Primary)
+            .setOnClick([self] {
+                if (self->m_host && self->m_host->logInfo) {
+                    self->m_host->logInfo(self->m_host->editorContext,
+                                          "Hello Plugin button clicked");
+                }
+            });
+
+        UIContext ctx;
+        ctx.draw(root);
 #else
         (void)userData;
 #endif

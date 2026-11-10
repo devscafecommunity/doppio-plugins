@@ -1,5 +1,6 @@
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 #include "ProceduralBridge.hpp"
 
 extern "C" void caffeine_procedural_plugin_register_services(
@@ -115,89 +116,113 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<ProceduralToolsPlugin*>(userData);
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("procedural_tools_root");
+
         auto* world = Caffeine::Editor::PluginActiveWorld(self->m_host);
         if (!world) {
-            EmptyState("No active scene", "Open or create a scene to author procedural streaming.",
-                       "terrain");
+            root.emplace<Elements::EmptyState>(
+                "No active scene",
+                "Open or create a scene to author procedural streaming.", "terrain");
+            ui.draw(root);
             return;
         }
 
-        PanelHeader("Procedural Tools", "Streaming terrain, structures and Lua directors",
-                    "terrain");
-        Paragraph(
-            "Modular tools for procedural streaming: combine terrain generators, structure "
-            "spawners, and Lua directors to build any game. Press Play to stream chunks.");
+        auto& header = root.emplace<Card>("procedural_header");
+        header.emplace<Label>("Procedural Tools", TextTone::Accent).setHeading(true);
+        header.emplace<Label>("Streaming terrain, structures and Lua directors",
+                              TextTone::Muted);
+        header.emplace<Elements::Paragraph>(
+            "Modular tools for procedural streaming: combine terrain generators, "
+            "structure spawners, and Lua directors to build any game. Press Play to "
+            "stream chunks.");
 
-        if (Section("Streaming")) {
-            if (BeginPropertyGrid("procedural_streaming")) {
-                DragIntProperty("Seed", &self->m_seed, 1.0f, 0, 999999);
-                DragFloatProperty("Chunk size (m)", &self->m_chunkSize, 4.0f, 32.0f, 256.0f,
-                                  "%.0f");
-                DragIntProperty("View radius (chunks)", &self->m_viewRadius, 1.0f, 2, 12);
-                EndPropertyGrid();
-            }
-        }
+        auto& streaming = root.emplace<Elements::Section>("Streaming");
+        auto& streamingGrid = streaming.emplace<PropertyGrid>("procedural_streaming");
+        streamingGrid.typedRow<IntProperty>("Seed", self->m_seed, 0, 999999, 1.0f, "%d");
+        streamingGrid.typedRow<FloatProperty>("Chunk size (m)", self->m_chunkSize, 32.0f,
+                                              256.0f, 4.0f, "%.0f");
+        streamingGrid.typedRow<IntProperty>("View radius (chunks)", self->m_viewRadius, 2, 12,
+                                            1.0f, "%d");
 
-        if (Section("Built-in generators")) {
-            if (BeginPropertyGrid("procedural_generators")) {
-                ComboProperty("Terrain height", &self->m_terrainProfileIndex,
-                              kTerrainProfileLabels, IM_ARRAYSIZE(kTerrainProfileLabels));
-                HelpMarker("Height profile baked per chunk. Override in Lua with "
-                           "generateTerrainChunk / fillTerrainNoise.");
-                ComboProperty("Structure spawner", &self->m_structureProfileIndex,
-                              kStructureProfileLabels, IM_ARRAYSIZE(kStructureProfileLabels));
-                HelpMarker("Optional cubes spawned per chunk. Use none and spawn via Lua for full "
-                           "control.");
-                EndPropertyGrid();
-            }
-        }
+        auto& generators = root.emplace<Elements::Section>("Built-in generators");
+        auto& generatorGrid = generators.emplace<PropertyGrid>("procedural_generators");
+        generatorGrid
+            .typedRow<ChoiceProperty>(
+                "Terrain height", self->m_terrainProfileIndex,
+                std::vector<std::string>{std::begin(kTerrainProfileLabels),
+                                         std::end(kTerrainProfileLabels)})
+            .setHint("Height profile baked per chunk. Override in Lua with "
+                     "generateTerrainChunk / fillTerrainNoise.");
+        generatorGrid
+            .typedRow<ChoiceProperty>(
+                "Structure spawner", self->m_structureProfileIndex,
+                std::vector<std::string>{std::begin(kStructureProfileLabels),
+                                         std::end(kStructureProfileLabels)})
+            .setHint("Optional cubes spawned per chunk. Use none and spawn via Lua for "
+                     "full control.");
 
-        if (Section("Director script")) {
-            if (BeginPropertyGrid("procedural_director")) {
-                InputTextProperty("Script path", self->m_scriptPath, sizeof(self->m_scriptPath));
-                EndPropertyGrid();
-            }
-            if (ToolbarButton("Install Lua scripts to project",
-                              "Copies templates to scripts/procedural/")) {
-                installScriptsMenu(self);
-            }
-        }
+        auto& director = root.emplace<Elements::Section>("Director script");
+        auto& directorGrid = director.emplace<PropertyGrid>("procedural_director");
+        directorGrid.typedRow<BufferProperty>("Script path", self->m_scriptPath,
+                                               sizeof(self->m_scriptPath));
+        auto& installRow = director.emplace<Row>("procedural_install_row");
+        auto& install = installRow.emplace<Button>("Install Lua scripts to project");
+        install.setGrow(true);
+        install.setTooltip("Copies templates to scripts/procedural/");
+        install.setOnClick([self] { installScriptsMenu(self); });
 
-        if (Section("Scene setup")) {
-            if (PrimaryButton("Create Streaming Setup", ImVec2(-1, 0))) {
-                if (self->invokeStreamingSetup(world) && self->m_host->logInfo) {
+        auto& setup = root.emplace<Elements::Section>("Scene setup");
+        auto& setupRow = setup.emplace<Row>("procedural_setup_row");
+        auto& create = setupRow.emplace<Button>("Create Streaming Setup",
+                                                ButtonVariant::Primary);
+        create.setGrow(true);
+        create.setOnClick([self, world] {
+            if (self->invokeStreamingSetup(world) && self->m_host->logInfo) {
+                self->m_host->logInfo(self->m_host->editorContext,
+                                      "Streaming setup created. Press Play to stream.");
+            }
+        });
+        setup.emplace<Label>("Creates ProceduralTerrain + ProceduralDirector with your settings.",
+                             TextTone::Muted)
+            .setWrap(true);
+
+        auto& api = root.emplace<Elements::Section>("Lua API reference", false);
+        api.emplace<Label>("- caffeine.procedural.stream(director, terrain, cx, cz)",
+                           TextTone::Muted);
+        api.emplace<Label>("- caffeine.procedural.generateTerrainChunk(...)",
+                           TextTone::Muted);
+        api.emplace<Label>("- caffeine.procedural.spawnCube(...)", TextTone::Muted);
+        api.emplace<Label>("- caffeine.procedural.fbm2d / noise2d / hash", TextTone::Muted);
+        api.emplace<Label>("- caffeine.procedural.getFocusChunk / isChunkLoaded",
+                           TextTone::Muted);
+
+        auto& benchmarks = root.emplace<Elements::Section>("Benchmarks (examples)", false);
+        benchmarks.emplace<Elements::Paragraph>(
+            "Reference setups - not game types. Study or duplicate these scripts, then "
+            "mix tools for your own design.");
+        auto& benchmarkRow = benchmarks.emplace<Row>("procedural_benchmarks");
+        for (int i = 0; i < 3; ++i) {
+            auto& benchmark = benchmarkRow.emplace<Button>(kBenchmarkLabels[i]);
+            benchmark.setGrow(true);
+            benchmark.setTooltip("Load this benchmark scene");
+            benchmark.setOnClick([self, world, i] {
+                if (self->invokeBenchmark(world, i) && self->m_host->logInfo) {
                     self->m_host->logInfo(self->m_host->editorContext,
-                                          "Streaming setup created. Press Play to stream.");
+                                          "Benchmark scene loaded. Press Play to test.");
                 }
-            }
-            HelpMarker("Creates ProceduralTerrain + ProceduralDirector with your settings.");
+            });
         }
+        benchmarks.emplace<Elements::Separator>();
+        benchmarks.emplace<Label>(
+            "Scripts: exploration_director.lua, backrooms_director.lua, "
+            "endless_race_director.lua, custom_director.lua",
+            TextTone::Muted)
+            .setWrap(true);
 
-        if (Section("Lua API reference", false)) {
-            Bullet("caffeine.procedural.stream(director, terrain, cx, cz)");
-            Bullet("caffeine.procedural.generateTerrainChunk(...)");
-            Bullet("caffeine.procedural.spawnCube(...)");
-            Bullet("caffeine.procedural.fbm2d / noise2d / hash");
-            Bullet("caffeine.procedural.getFocusChunk / isChunkLoaded");
-        }
-
-        if (Section("Benchmarks (examples)", false)) {
-            Paragraph(
-                "Reference setups — not game types. Study or duplicate these scripts, then mix "
-                "tools for your own design.");
-            for (int i = 0; i < 3; ++i) {
-                if (ToolbarButton(kBenchmarkLabels[i], "Load this benchmark scene")) {
-                    if (self->invokeBenchmark(world, i) && self->m_host->logInfo) {
-                        self->m_host->logInfo(self->m_host->editorContext,
-                                              "Benchmark scene loaded. Press Play to test.");
-                    }
-                }
-                if (i < 2) SameLine();
-            }
-            SeparatorSpaced();
-            TextMuted("Scripts: exploration_director.lua, backrooms_director.lua, "
-                      "endless_race_director.lua, custom_director.lua");
-        }
+        ui.draw(root);
 #else
         (void)userData;
 #endif

@@ -1,6 +1,7 @@
 #include "caffeine/environment/VolumetricClouds.hpp"
 #include "caffeine/plugin/PluginAPI.hpp"
 #include "caffeine/plugin/PluginUI.hpp"
+#include "caffeine/ui/UI.hpp"
 
 #include "ecs/ComponentQuery.hpp"
 #include "ecs/World.hpp"
@@ -243,14 +244,22 @@ private:
 #ifdef CF_HAS_IMGUI
         auto* self = static_cast<VolumetricCloudsPlugin*>(userData);
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
+
+        UIContext ui;
+        Column root("vcm_root");
+
+        auto& header = root.emplace<Card>("vcm_header");
+        header.emplace<Label>("VC&M", TextTone::Accent).setHeading(true);
+        header.emplace<Label>("Volumetric Clouds & Mist", TextTone::Muted);
 
         Caffeine::ECS::World* world =
             Caffeine::Editor::PluginActiveWorld(self->m_host);
-        PanelHeader("VC&M", "Volumetric Clouds & Mist", "bluesky");
-
         if (!world) {
-            EmptyState("No active scene", "Open or create a scene to author the atmosphere.",
-                       "bluesky");
+            root.emplace<Elements::EmptyState>(
+                "No active scene",
+                "Open or create a scene to author the atmosphere.", "bluesky");
+            ui.draw(root);
             return;
         }
 
@@ -259,107 +268,138 @@ private:
             target.isValid() ? world->get<VolumetricCloudsComponent>(target) : nullptr;
 
         if (!clouds) {
-            EmptyState("No atmosphere target",
-                       "Select an entity and press Generate, or create a dedicated atmosphere.",
-                       "bluesky");
-            if (PrimaryButton("Create atmosphere")) {
-                target = ensureTarget(self->m_host, *world, true);
-                clouds = target.isValid()
-                             ? world->get<VolumetricCloudsComponent>(target)
-                             : nullptr;
-                if (clouds) {
-                    evaluate(self->m_weather, *clouds);
+            root.emplace<Elements::EmptyState>(
+                "No atmosphere target",
+                "Select an entity and press Generate, or create a dedicated atmosphere.",
+                "bluesky");
+            auto& create = root.emplace<Button>("Create atmosphere", ButtonVariant::Primary);
+            create.setOnClick([self, world] {
+                const Caffeine::ECS::Entity created =
+                    ensureTarget(self->m_host, *world, true);
+                if (auto* component = created.isValid()
+                                          ? world->get<VolumetricCloudsComponent>(created)
+                                          : nullptr) {
+                    evaluate(self->m_weather, *component);
                     markDirty(self);
                 }
-            }
+            });
+            ui.draw(root);
             return;
         }
 
-        if (Toggle("Enabled", &clouds->enabled)) markDirty(self);
-        SameLine();
-        TextMuted(classify(*clouds));
+        auto& state = root.emplace<Card>("vcm_state");
+        auto& stateRow = state.emplace<Row>("vcm_state_row");
+        stateRow.emplace<Checkbox>("Enabled", &clouds->enabled)
+            .setOnChange([self](bool) { markDirty(self); });
+        auto& classification = stateRow.emplace<Label>(classify(*clouds), TextTone::Muted);
+        classification.setGrow(true);
 
-        if (Section("Weather", true)) {
-            if (BeginPropertyGrid("vcm_weather")) {
-                if (ComboProperty("Preset", &self->m_preset, kPresetNames, PresetCount)) {
-                    applyPreset(self->m_preset, self->m_weather);
-                }
-                SliderFloatProperty("Humidity", &self->m_weather.humidity, 0.0f, 1.0f);
-                SliderFloatProperty("Instability", &self->m_weather.instability, 0.0f, 1.0f);
-                DragFloatProperty("Wind speed", &self->m_weather.windSpeed, 0.2f, 0.0f, 80.0f);
-                DragFloatProperty("Wind direction", &self->m_weather.windDirection, 1.0f,
-                                  0.0f, 360.0f);
-                DragFloatProperty("Seed", &self->m_weather.seed, 0.1f, -10000.0f, 10000.0f);
-                if (ComboProperty("Quality", &self->m_weather.quality, kQualityNames, 3)) {
-                    self->m_weather.quality = std::clamp(self->m_weather.quality, 0, 2);
-                }
-                EndPropertyGrid();
-            }
+        auto mark = [self](auto&&...) { markDirty(self); };
 
-            if (PrimaryButton("Generate")) {
-                evaluate(self->m_weather, *clouds);
+        auto& weather = root.emplace<Elements::Section>("Weather");
+        auto& weatherGrid = weather.emplace<PropertyGrid>("vcm_weather");
+        weatherGrid
+            .typedRow<ChoiceProperty>(
+                "Preset", self->m_preset,
+                std::vector<std::string>{std::begin(kPresetNames), std::end(kPresetNames)})
+            .setOnChange([self](int value) {
+                applyPreset(value, self->m_weather);
+            });
+        weatherGrid.typedRow<FloatProperty>("Humidity", self->m_weather.humidity, 0.0f, 1.0f,
+                                            0.01f, "%.2f", true);
+        weatherGrid.typedRow<FloatProperty>("Instability", self->m_weather.instability, 0.0f,
+                                            1.0f, 0.01f, "%.2f", true);
+        weatherGrid.typedRow<FloatProperty>("Wind speed", self->m_weather.windSpeed, 0.0f,
+                                            80.0f, 0.2f, "%.2f");
+        weatherGrid.typedRow<FloatProperty>("Wind direction", self->m_weather.windDirection,
+                                            0.0f, 360.0f, 1.0f, "%.1f");
+        weatherGrid.typedRow<FloatProperty>("Seed", self->m_weather.seed, -10000.0f, 10000.0f,
+                                            0.1f, "%.2f");
+        weatherGrid
+            .typedRow<ChoiceProperty>(
+                "Quality", self->m_weather.quality,
+                std::vector<std::string>{std::begin(kQualityNames), std::end(kQualityNames)})
+            .setOnChange([self](int value) {
+                self->m_weather.quality = std::clamp(value, 0, 2);
+            });
+
+        auto& weatherActions = weather.emplace<Row>("vcm_weather_actions");
+        auto& generate = weatherActions.emplace<Button>("Generate", ButtonVariant::Primary);
+        generate.setWidth(92.0f);
+        generate.setOnClick([self, clouds] {
+            evaluate(self->m_weather, *clouds);
+            markDirty(self);
+        });
+        auto& randomize = weatherActions.emplace<Button>("Randomize");
+        randomize.setWidth(96.0f);
+        randomize.setTooltip("Randomize weather and seed");
+        randomize.setOnClick([self, clouds] {
+            const float t = std::fmod(self->m_weather.seed * 0.6180339f + 0.37f, 1.0f);
+            self->m_weather.seed = std::fmod(self->m_weather.seed + 17.31f, 10000.0f);
+            self->m_weather.humidity = std::clamp(0.25f + t * 0.65f, 0.0f, 1.0f);
+            self->m_weather.instability =
+                std::clamp(0.10f + std::fmod(t * 7.13f, 1.0f) * 0.8f, 0.0f, 1.0f);
+            evaluate(self->m_weather, *clouds);
+            markDirty(self);
+        });
+        auto& clear = weatherActions.emplace<Button>("Clear");
+        clear.setWidth(64.0f);
+        clear.setTooltip("Disable the cloud layer");
+        clear.setOnClick([self, clouds] {
+            clouds->enabled = false;
+            markDirty(self);
+        });
+
+        auto& layer = root.emplace<Elements::Section>("Cloud layer");
+        self->m_componentQuality = static_cast<int>(clouds->quality);
+        auto& layerGrid = layer.emplace<PropertyGrid>("vcm_clouds");
+        layerGrid.typedRow<IntProperty>("Quality", self->m_componentQuality, 1, 3, 1.0f, "%d",
+                                        true)
+            .setOnChange([self, clouds](int value) {
+                clouds->quality = static_cast<Caffeine::u8>(value);
                 markDirty(self);
-            }
-            SameLine();
-            if (ToolbarButton("Randomize", "Randomize weather and seed")) {
-                const float t = std::fmod(self->m_weather.seed * 0.6180339f + 0.37f, 1.0f);
-                self->m_weather.seed = std::fmod(self->m_weather.seed + 17.31f, 10000.0f);
-                self->m_weather.humidity = std::clamp(0.25f + t * 0.65f, 0.0f, 1.0f);
-                self->m_weather.instability = std::clamp(
-                    0.10f + std::fmod(t * 7.13f, 1.0f) * 0.8f, 0.0f, 1.0f);
-                evaluate(self->m_weather, *clouds);
-                markDirty(self);
-            }
-            SameLine();
-            if (ToolbarButton("Clear", "Disable the cloud layer")) {
-                clouds->enabled = false;
-                markDirty(self);
-            }
-        }
+            });
+        layerGrid.typedRow<FloatProperty>("Coverage", clouds->coverage, 0.0f, 1.0f, 0.01f,
+                                          "%.2f", true).setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Density", clouds->density, 0.0f, 8.0f, 0.01f,
+                                          "%.2f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Base altitude", clouds->baseAltitude, 0.0f,
+                                          20000.0f, 10.0f, "%.0f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Top altitude", clouds->topAltitude, 1.0f, 30000.0f,
+                                          10.0f, "%.0f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Detail", clouds->detail, 0.0f, 1.0f, 0.01f, "%.2f",
+                                          true).setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Wind speed", clouds->windSpeed, 0.0f, 120.0f, 0.2f,
+                                          "%.2f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Wind direction", clouds->windDirection, 0.0f, 360.0f,
+                                          1.0f, "%.1f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Seed", clouds->seed, -10000.0f, 10000.0f, 0.1f,
+                                          "%.2f").setOnChange(mark);
+        layerGrid.typedRow<FloatProperty>("Sun scatter", clouds->sunScatter, 0.0f, 3.0f, 0.01f,
+                                          "%.2f", true).setOnChange(mark);
 
-        if (Section("Cloud layer")) {
-            bool changed = false;
-            if (BeginPropertyGrid("vcm_clouds")) {
-                int quality = static_cast<int>(clouds->quality);
-                if (SliderIntProperty("Quality", &quality, 1, 3)) {
-                    clouds->quality = static_cast<Caffeine::u8>(quality);
-                    changed = true;
-                }
-                changed |= SliderFloatProperty("Coverage", &clouds->coverage, 0.0f, 1.0f);
-                changed |= DragFloatProperty("Density", &clouds->density, 0.01f, 0.0f, 8.0f);
-                changed |= DragFloatProperty("Base altitude", &clouds->baseAltitude, 10.0f,
-                                             0.0f, 20000.0f);
-                changed |= DragFloatProperty("Top altitude", &clouds->topAltitude, 10.0f,
-                                             1.0f, 30000.0f);
-                changed |= SliderFloatProperty("Detail", &clouds->detail, 0.0f, 1.0f);
-                changed |= DragFloatProperty("Wind speed", &clouds->windSpeed, 0.2f, 0.0f,
-                                             120.0f);
-                changed |= DragFloatProperty("Wind direction", &clouds->windDirection, 1.0f,
-                                             0.0f, 360.0f);
-                changed |= DragFloatProperty("Seed", &clouds->seed, 0.1f, -10000.0f,
-                                             10000.0f);
-                changed |= SliderFloatProperty("Sun scatter", &clouds->sunScatter, 0.0f, 3.0f);
-                EndPropertyGrid();
-            }
-            if (changed) markDirty(self);
-        }
+        auto& mist = root.emplace<Elements::Section>("Mist");
+        auto& mistGrid = mist.emplace<PropertyGrid>("vcm_mist");
+        mistGrid.typedRow<FloatProperty>("Density", clouds->mistDensity, 0.0f, 1.0f, 0.01f,
+                                         "%.2f", true).setOnChange(mark);
+        mistGrid.typedRow<FloatProperty>("Height", clouds->mistHeight, 1.0f, 500.0f, 1.0f,
+                                         "%.0f").setOnChange(mark);
+        mistGrid.typedRow<FloatProperty>("Falloff", clouds->mistFalloff, 0.0f, 2.0f, 0.01f,
+                                         "%.2f").setOnChange(mark);
 
-        if (Section("Mist")) {
-            bool changed = false;
-            if (BeginPropertyGrid("vcm_mist")) {
-                changed |= SliderFloatProperty("Density", &clouds->mistDensity, 0.0f, 1.0f);
-                changed |= DragFloatProperty("Height", &clouds->mistHeight, 1.0f, 1.0f, 500.0f);
-                changed |= DragFloatProperty("Falloff", &clouds->mistFalloff, 0.01f, 0.0f, 2.0f);
-                EndPropertyGrid();
-            }
-            if (changed) markDirty(self);
-        }
-
-        SeparatorSpaced();
-        TextMutedF("Layer: %.0f m → %.0f m", clouds->baseAltitude, clouds->topAltitude);
+        root.emplace<Elements::Separator>();
+        char layerInfo[128];
+        std::snprintf(layerInfo, sizeof(layerInfo), "Layer: %.0f m -> %.0f m",
+                      clouds->baseAltitude, clouds->topAltitude);
+        root.emplace<Label>(layerInfo, TextTone::Muted);
         if (target.isValid()) {
-            TextMutedF("Target entity: %u", target.id());
+            root.emplace<Label>("Target entity: " + std::to_string(target.id()),
+                                TextTone::Muted);
         }
+
+        ui.draw(root);
+#else
+        (void)userData;
 #endif
     }
 
@@ -368,39 +408,54 @@ private:
         auto* clouds = static_cast<VolumetricCloudsComponent*>(componentData);
         auto* self = static_cast<VolumetricCloudsPlugin*>(userData);
         if (!clouds) return;
+
         using namespace Caffeine::UIKit;
+        using namespace Caffeine::UIKit::Elements;
 
-        bool changed = false;
-        TextMuted(classify(*clouds));
+        UIContext ui;
+        Column root("vcm_component_root");
+        root.emplace<Label>(classify(*clouds), TextTone::Muted);
 
-        if (BeginPropertyGrid("vcm_component")) {
-            int quality = static_cast<int>(clouds->quality);
-            if (SliderIntProperty("Quality", &quality, 0, 3)) {
-                clouds->quality = static_cast<Caffeine::u8>(quality);
-                changed = true;
-            }
-            changed |= SliderFloatProperty("Coverage", &clouds->coverage, 0.0f, 1.0f);
-            changed |= DragFloatProperty("Density", &clouds->density, 0.01f, 0.0f, 8.0f);
-            changed |= DragFloatProperty("Base altitude", &clouds->baseAltitude, 10.0f,
-                                         0.0f, 20000.0f);
-            changed |= DragFloatProperty("Top altitude", &clouds->topAltitude, 10.0f,
-                                         1.0f, 30000.0f);
-            changed |= SliderFloatProperty("Detail", &clouds->detail, 0.0f, 1.0f);
-            changed |= DragFloatProperty("Wind speed", &clouds->windSpeed, 0.2f, 0.0f, 120.0f);
-            changed |= DragFloatProperty("Wind direction", &clouds->windDirection, 1.0f,
-                                         0.0f, 360.0f);
-            changed |= DragFloatProperty("Seed", &clouds->seed, 0.1f, -10000.0f, 10000.0f);
-            changed |= SliderFloatProperty("Mist density", &clouds->mistDensity, 0.0f, 1.0f);
-            changed |= DragFloatProperty("Mist height", &clouds->mistHeight, 1.0f, 1.0f, 500.0f);
-            EndPropertyGrid();
-        }
-        if (changed) markDirty(self);
+        self->m_componentQuality = static_cast<int>(clouds->quality);
+        auto& grid = root.emplace<PropertyGrid>("vcm_component");
+        auto mark = [self](auto&&...) { markDirty(self); };
+        grid.typedRow<IntProperty>("Quality", self->m_componentQuality, 0, 3, 1.0f, "%d", true)
+            .setOnChange([self, clouds](int value) {
+                clouds->quality = static_cast<Caffeine::u8>(value);
+                markDirty(self);
+            });
+        grid.typedRow<FloatProperty>("Coverage", clouds->coverage, 0.0f, 1.0f, 0.01f, "%.2f",
+                                     true).setOnChange(mark);
+        grid.typedRow<FloatProperty>("Density", clouds->density, 0.0f, 8.0f, 0.01f, "%.2f")
+            .setOnChange(mark);
+        grid.typedRow<FloatProperty>("Base altitude", clouds->baseAltitude, 0.0f, 20000.0f,
+                                     10.0f, "%.0f").setOnChange(mark);
+        grid.typedRow<FloatProperty>("Top altitude", clouds->topAltitude, 1.0f, 30000.0f,
+                                     10.0f, "%.0f").setOnChange(mark);
+        grid.typedRow<FloatProperty>("Detail", clouds->detail, 0.0f, 1.0f, 0.01f, "%.2f", true)
+            .setOnChange(mark);
+        grid.typedRow<FloatProperty>("Wind speed", clouds->windSpeed, 0.0f, 120.0f, 0.2f,
+                                     "%.2f").setOnChange(mark);
+        grid.typedRow<FloatProperty>("Wind direction", clouds->windDirection, 0.0f, 360.0f,
+                                     1.0f, "%.1f").setOnChange(mark);
+        grid.typedRow<FloatProperty>("Seed", clouds->seed, -10000.0f, 10000.0f, 0.1f, "%.2f")
+            .setOnChange(mark);
+        grid.typedRow<FloatProperty>("Mist density", clouds->mistDensity, 0.0f, 1.0f, 0.01f,
+                                     "%.2f", true).setOnChange(mark);
+        grid.typedRow<FloatProperty>("Mist height", clouds->mistHeight, 1.0f, 500.0f, 1.0f,
+                                     "%.0f").setOnChange(mark);
+
+        ui.draw(root);
+#else
+        (void)componentData;
+        (void)userData;
 #endif
     }
 
     const Caffeine::Editor::PluginHostApi* m_host = nullptr;
     WeatherModel m_weather{};
     int m_preset = PresetCumulus;
+    int m_componentQuality = 2;
 };
 
 }  // namespace
